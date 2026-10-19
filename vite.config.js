@@ -13,6 +13,12 @@ export default defineConfig({
   base: "./",
   // React transforma JSX y Tailwind genera las utilidades usadas por las vistas.
   plugins: [react(), tailwindcss()],
+  // Reenvía las peticiones de la web al backend durante el desarrollo local.
+  server: {
+    proxy: {
+      "/api": "http://localhost:3000",
+    },
+  },
   build: {
     // Elimina y regenera la salida para evitar bundles obsoletos o páginas duplicadas.
     outDir: resolve(projectRoot, "docs"),

@@ -1,5 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
-import { CART_KEY, DATA_KEY, loadCart, readCatalog, saveCart } from "../services/catalogStorage.js";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { CART_KEY, CATALOG_CHANGE_KEY, loadCart, saveCart } from "../services/catalogStorage.js";
+import { fetchPublicCatalog } from "../services/catalogApi.js";
 import { money } from "../shared/format.js";
 import { Brand, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
@@ -75,8 +76,9 @@ function SummaryCard({ items, subtotal }) {
 
 /** Gestiona revisión del carrito, dirección y validación visual del método de pago. */
 export function Checkout() {
-  const [catalog, setCatalog] = useState(readCatalog);
-  const [cart, setCart] = useState(() => loadCart(catalog.products));
+  const [catalog, setCatalog] = useState({ products: [], categories: [] });
+  const [catalogStatus, setCatalogStatus] = useState("loading");
+  const [cart, setCart] = useState([]);
   const [step, setStep] = useState("review");
   const [confirmed, setConfirmed] = useState(false);
   const [address, setAddress] = useState({
@@ -105,17 +107,36 @@ export function Checkout() {
   );
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  // Refresca precios, existencias y cantidades cuando otra pestaña hace cambios.
-  const handleStorageChange = useCallback((event) => {
-    if (event.key !== null && event.key !== CART_KEY && event.key !== DATA_KEY) return;
-    const nextCatalog = readCatalog();
-    const nextCart = loadCart(nextCatalog.products);
-    setCatalog(nextCatalog);
-    setCart(nextCart);
-    saveCart(nextCart);
-    setConfirmed(false);
-    if (!nextCart.length) setStep("review");
+  // Consulta al backend y limita el carrito a los productos e inventario vigentes.
+  const refreshCatalog = useCallback(async () => {
+    setCatalogStatus("loading");
+    try {
+      const nextCatalog = await fetchPublicCatalog();
+      const nextCart = loadCart(nextCatalog.products);
+      setCatalog(nextCatalog);
+      setCart(nextCart);
+      setConfirmed(false);
+      if (!nextCart.length) setStep("review");
+      setCatalogStatus("ready");
+    } catch (error) {
+      console.error("No se pudo cargar el catálogo del backend para Checkout.", error);
+      setCatalogStatus("error");
+    }
   }, []);
+
+  useEffect(() => {
+    refreshCatalog();
+  }, [refreshCatalog]);
+
+  // Recarga el catálogo si el carrito cambia en otra pestaña.
+  const handleStorageChange = useCallback(
+    (event) => {
+      if (event.key === CART_KEY || event.key === CATALOG_CHANGE_KEY || event.key === null) {
+        refreshCatalog();
+      }
+    },
+    [refreshCatalog]
+  );
   useCrossTabStorage(handleStorageChange);
 
   // Ajusta o elimina una línea y exige confirmar de nuevo el resumen si cambia.
@@ -210,7 +231,21 @@ export function Checkout() {
           </p>
         </div>
         <StepProgress active={step} />
-        {!items.length ? (
+        {catalogStatus === "loading" ? (
+          <p className="card p-10 text-center text-muted" role="status">
+            Comprobando productos y existencias...
+          </p>
+        ) : catalogStatus === "error" ? (
+          <div className="card p-10 text-center" role="alert">
+            <h2 className="font-display text-2xl">No pudimos comprobar los productos</h2>
+            <p className="mt-2 text-sm text-muted">
+              Verifica que el backend esté ejecutándose antes de continuar.
+            </p>
+            <button className="btn-primary mt-5" onClick={refreshCatalog}>
+              Intentar de nuevo
+            </button>
+          </div>
+        ) : !items.length ? (
           <div className="card p-10 text-center">
             <h2 className="font-display text-2xl">Tu carrito está vacío</h2>
             <p className="mt-2 text-sm text-muted">Agrega productos antes de continuar.</p>

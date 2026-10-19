@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
-import { CART_KEY, DATA_KEY, loadCart, readCatalog, saveCart } from "../services/catalogStorage.js";
+import { CART_KEY, CATALOG_CHANGE_KEY, loadCart, saveCart } from "../services/catalogStorage.js";
+import { fetchPublicCatalog } from "../services/catalogApi.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails } from "../data/productDetails.js";
 import { money } from "../shared/format.js";
@@ -471,8 +472,9 @@ function AccountGate({ mode, onBack }) {
 
 /** Pantalla principal: sincroniza catálogo, filtros, carrito, cuenta y checkout. */
 export function Storefront() {
-  const [catalog, setCatalog] = useState(readCatalog);
-  const [cart, setCart] = useState(() => loadCart(catalog.products));
+  const [catalog, setCatalog] = useState({ products: [], categories: [] });
+  const [catalogStatus, setCatalogStatus] = useState("loading");
+  const [cart, setCart] = useState([]);
   const [activeCategory, setActiveCategory] = useState("Todos");
   const [query, setQuery] = useState("");
   const [cartOpen, setCartOpen] = useState(false);
@@ -497,24 +499,31 @@ export function Storefront() {
     return () => window.removeEventListener("scroll", updateScrollState);
   }, []);
 
-  // Lee la fuente compartida y ajusta el carrito tras cambios de inventario.
-  const refresh = useCallback(() => {
-    const nextCatalog = readCatalog();
-    setCatalog(nextCatalog);
-    setCart((current) => {
-      const nextCart = loadCart(nextCatalog.products);
-      if (JSON.stringify(nextCart) !== JSON.stringify(current)) saveCart(nextCart);
-      return nextCart;
-    });
+  // Obtiene el catálogo del servidor y ajusta el carrito al inventario vigente.
+  const refresh = useCallback(async () => {
+    setCatalogStatus("loading");
+    try {
+      const nextCatalog = await fetchPublicCatalog();
+      setCatalog(nextCatalog);
+      setCart((current) => {
+        const nextCart = loadCart(nextCatalog.products);
+        if (JSON.stringify(nextCart) !== JSON.stringify(current)) saveCart(nextCart);
+        return nextCart;
+      });
+      setCatalogStatus("ready");
+    } catch (error) {
+      console.error("No se pudo cargar el catálogo del backend.", error);
+      setCatalogStatus("error");
+    }
   }, []);
 
-  // Actualiza productos y carrito cuando Admin o una pestaña vecina modifica datos.
+  // Sincroniza el carrito cuando cambia en otra pestaña.
   const handleStorageChange = useCallback(
     (event) => {
-      if (event.key === null || event.key === DATA_KEY) refresh();
-      if (event.key === CART_KEY) setCart(loadCart(readCatalog().products));
+      if (event.key === CATALOG_CHANGE_KEY) refresh();
+      if (event.key === CART_KEY) setCart(loadCart(catalog.products));
     },
-    [refresh]
+    [catalog.products, refresh]
   );
 
   useCrossTabStorage(handleStorageChange);
@@ -697,7 +706,21 @@ export function Storefront() {
       ) : (
         <>
           <main>
-            {isProduct ? (
+            {catalogStatus === "loading" ? (
+              <p className="mx-auto max-w-7xl px-5 py-20 text-center text-muted" role="status">
+                Cargando productos...
+              </p>
+            ) : catalogStatus === "error" ? (
+              <section className="mx-auto max-w-2xl px-5 py-20 text-center" role="alert">
+                <h1 className="font-display text-3xl">No pudimos cargar los productos</h1>
+                <p className="mt-3 text-sm text-muted">
+                  Verifica que el backend esté ejecutándose y vuelve a intentarlo.
+                </p>
+                <button className="btn-primary mt-6" onClick={refresh}>
+                  Intentar de nuevo
+                </button>
+              </section>
+            ) : isProduct ? (
               <ProductDetail
                 product={selectedProduct}
                 products={catalog.products}

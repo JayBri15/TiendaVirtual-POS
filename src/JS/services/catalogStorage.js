@@ -3,6 +3,18 @@ import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from "../data/defaultCatalog.js"
 /** Claves de almacenamiento compartidas entre pestañas y las vistas del sitio. */
 export const DATA_KEY = "amway-admin-demo-data-v1";
 export const CART_KEY = "amway-demo-cart-v1";
+export const CATALOG_CHANGE_KEY = "amway-public-catalog-updated-v1";
+let catalogChangeSequence = 0;
+
+/** Notifica a otras pestañas que deben volver a leer el catálogo del servidor. */
+export function announceCatalogChange() {
+  try {
+    catalogChangeSequence += 1;
+    localStorage.setItem(CATALOG_CHANGE_KEY, `${Date.now()}-${catalogChangeSequence}`);
+  } catch (error) {
+    console.error("No se pudo avisar a otras pestañas que cambió el catálogo.", error);
+  }
+}
 
 /**
  * Comprueba que una imagen sea una URL web segura o una imagen permitida
@@ -118,7 +130,7 @@ function areRecommendationsValid(products) {
  * @param {unknown} value Datos JSON sin validar.
  * @returns {boolean} True si categorías, productos e invariantes son válidos.
  */
-function isValidCatalog(value) {
+export function isValidCatalog(value) {
   if (!value || typeof value !== "object") return false;
   const { products, categories } = value;
   if (!Array.isArray(products) || !Array.isArray(categories)) return false;

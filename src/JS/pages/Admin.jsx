@@ -1,14 +1,30 @@
-import React, { useCallback, useState } from "react";
-import { DATA_KEY, isValidImage, saveCatalog } from "../services/catalogStorage.js";
+import React, { useCallback, useEffect, useState } from "react";
+import {
+  CATALOG_CHANGE_KEY,
+  DATA_KEY,
+  isValidImage,
+  saveCatalog,
+} from "../services/catalogStorage.js";
 import { readAdminData } from "../services/adminStorage.js";
+import {
+  createAdminCategory,
+  createAdminProduct,
+  deleteAdminCategory,
+  deleteAdminProduct,
+  loginAdmin,
+  logoutAdmin,
+  readAdminSession,
+  updateAdminCategory,
+  updateAdminProduct,
+} from "../services/adminApi.js";
+import { fetchPublicCatalog } from "../services/catalogApi.js";
 import { makeId, money } from "../shared/format.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails, getRecommendedProducts } from "../data/productDetails.js";
 import { ProductDetail } from "../shared/ProductDetail.jsx";
 import { Brand, Field, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
-/** Claves y reglas de negocio usadas por las operaciones del portal Admin. */
-const SESSION_KEY = "amway-admin-demo-session-v1";
+/** Reglas de negocio usadas por las operaciones del portal Admin. */
 const LOW_STOCK = 5;
 const PAYMENT_METHODS = ["Efectivo", "Tarjeta (registro demo)", "Transferencia (registro demo)"];
 const NAVIGATION = [
@@ -566,21 +582,27 @@ function AdminModal({ form, close, save, data }) {
 }
 
 /**
- * Pantalla de acceso local al portal; sus credenciales son solo de demostración.
- * @param {{onLogin: (email: string, password: string) => string, notice: React.ReactNode}} props
+ * Pantalla de acceso cuya contraseña se comprueba únicamente en el backend.
+ * @param {{onLogin: (email: string, password: string) => Promise<string>, notice: React.ReactNode}} props
  */
 function AdminLogin({ onLogin, notice }) {
-  const [email, setEmail] = useState("admin@amway.demo");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
   return (
     <main className="grid min-h-screen place-items-center bg-[radial-gradient(ellipse_at_top_left,_#e8eadc,_#f5f4ed_55%)] px-5 py-10">
       <form
         className="w-full max-w-md rounded-xl border border-line bg-white p-7 shadow-xl sm:p-10"
-        onSubmit={(event) => {
+        onSubmit={async (event) => {
           event.preventDefault();
-          const result = onLogin(email, password);
-          setError(result || "");
+          setIsSubmitting(true);
+          setError("");
+          try {
+            setError((await onLogin(email, password)) || "");
+          } finally {
+            setIsSubmitting(false);
+          }
         }}
       >
         <Brand to="./" />
@@ -589,7 +611,7 @@ function AdminLogin({ onLogin, notice }) {
         </p>
         <h1 className="mt-2 font-display text-4xl">Bienvenido de nuevo</h1>
         <p className="mt-3 text-sm leading-6 text-muted">
-          Ingresa para abrir el panel de control de la tienda.
+          Ingresa con las credenciales configuradas en el servidor para abrir el panel.
         </p>
         <div className="mt-7 grid gap-4">
           <Field
@@ -616,18 +638,15 @@ function AdminLogin({ onLogin, notice }) {
             {error}
           </p>
         )}
-        <button className="btn-primary mt-6 w-full" type="submit">
-          Entrar al portal →
+        <button className="btn-primary mt-6 w-full" type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "Validando..." : "Entrar al portal →"}
         </button>
         <a className="btn-secondary mt-3 w-full" href="./">
           ← Regresar a la página principal
         </a>
         <p className="mt-5 rounded bg-paper p-3 text-xs leading-5 text-muted">
-          <strong className="text-ink">Acceso demo</strong>
-          <br />
-          admin@amway.demo · amway123
-          <br />
-          Solo demostración local. No uses credenciales ni datos reales.
+          No existe una cuenta demo integrada. El servidor valida el acceso y mantiene la contraseña
+          fuera del navegador.
         </p>
         {notice}
       </form>
@@ -640,9 +659,9 @@ export function Admin() {
   // Datos de dominio y estado efímero de las vistas, diálogo y carrito POS.
   const [data, setData] = useState(readAdminData);
   const [active, setActive] = useState("dashboard");
-  const [authenticated, setAuthenticated] = useState(
-    () => sessionStorage.getItem(SESSION_KEY) === "active"
-  );
+  const [authenticated, setAuthenticated] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [authNotice, setAuthNotice] = useState("");
   const [form, setForm] = useState(null);
   const [search, setSearch] = useState("");
   const [posCart, setPosCart] = useState([]);
@@ -650,10 +669,45 @@ export function Admin() {
   const [posPayment, setPosPayment] = useState(PAYMENT_METHODS[0]);
   const { notify, region } = useNotice();
 
+  // Restaura la sesión solo si el servidor valida la cookie protegida.
+  useEffect(() => {
+    let active = true;
+    const restoreSession = async () => {
+      try {
+        const isAuthenticated = await readAdminSession();
+        if (!active) return;
+        if (isAuthenticated) {
+          const catalog = await fetchPublicCatalog();
+          if (!active) return;
+          setData((current) => ({ ...current, ...catalog }));
+          setAuthenticated(true);
+        }
+      } catch (error) {
+        console.error("No se pudo restaurar la sesión de Admin.", error);
+        if (active) setAuthNotice("No se pudo cargar la sesión o el catálogo del servidor.");
+      } finally {
+        if (active) setAuthReady(true);
+      }
+    };
+    restoreSession();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Mantiene este panel actualizado si otra pestaña cambia productos o ventas.
   const handleStorageChange = useCallback((event) => {
+    if (event.key === CATALOG_CHANGE_KEY) {
+      fetchPublicCatalog()
+        .then((catalog) => setData((current) => ({ ...current, ...catalog })))
+        .catch((error) =>
+          console.error("No se pudo actualizar el catálogo desde el servidor.", error)
+        );
+      return;
+    }
     if (event.key !== DATA_KEY && event.key !== null) return;
-    setData(readAdminData());
+    const savedData = readAdminData();
+    setData((current) => ({ ...savedData, products: current.products }));
   }, []);
   useCrossTabStorage(handleStorageChange);
 
@@ -670,13 +724,18 @@ export function Admin() {
     }
   };
 
-  // Valida las credenciales demo y conserva la sesión solo en esta pestaña.
-  const login = (email, password) => {
-    if (email.toLocaleLowerCase("es-MX") !== "admin@amway.demo" || password !== "amway123")
-      return "El correo o la contraseña no son correctos.";
-    sessionStorage.setItem(SESSION_KEY, "active");
-    setAuthenticated(true);
-    return "";
+  // Lee el catálogo y luego inicia sesión; nunca almacena la contraseña localmente.
+  const login = async (email, password) => {
+    try {
+      const catalog = await fetchPublicCatalog();
+      await loginAdmin(email, password);
+      setData((current) => ({ ...current, ...catalog }));
+      setAuthNotice("");
+      setAuthenticated(true);
+      return "";
+    } catch (error) {
+      return error instanceof Error ? error.message : "No se pudo iniciar sesión.";
+    }
   };
 
   // Abre el formulario solicitado, evitando productos sin una categoría válida.
@@ -818,13 +877,23 @@ export function Admin() {
         )
       )
         throw new Error("Ya existe una categoría con ese nombre.");
-      next.categories = record
-        ? data.categories.map((item) => (item === record ? name : item))
-        : [...data.categories, name];
-      if (record)
+
+      if (record) {
+        const renamedCategory = await updateAdminCategory(record, name);
+        next.categories = data.categories.map((item) => (item === record ? renamedCategory : item));
         next.products = data.products.map((item) =>
-          item.category === record ? { ...item, category: name } : item
+          item.category === record ? { ...item, category: renamedCategory } : item
         );
+        setData({ ...data, ...next });
+        notify("Categoría renombrada y actualizada en el catálogo.");
+        return;
+      }
+
+      const createdCategory = await createAdminCategory(name);
+      next.categories = [...data.categories, createdCategory];
+      setData({ ...data, ...next });
+      notify("Categoría creada y visible en la tienda.");
+      return;
     } else if (type === "stock") {
       const stock = Number(values.stock);
       if (!Number.isInteger(stock) || stock < 0)
@@ -875,6 +944,28 @@ export function Admin() {
         ? data.admins.map((item) => (item.id === record.id ? admin : item))
         : [...data.admins, admin];
     }
+    if (type === "product" || type === "stock") {
+      const productToSave = record
+        ? next.products.find((item) => item.id === record.id)
+        : next.products.at(-1);
+      if (!productToSave) throw new Error("No se encontró el producto que intentas guardar.");
+
+      const savedProduct = record
+        ? await updateAdminProduct(record.id, productToSave)
+        : await createAdminProduct(productToSave);
+      const products = record
+        ? data.products.map((item) => (item.id === savedProduct.id ? savedProduct : item))
+        : [...data.products, savedProduct];
+      setData({ ...data, products });
+      notify(
+        type === "stock"
+          ? "Existencias actualizadas en el catálogo."
+          : record
+            ? "Producto actualizado en el catálogo."
+            : "Producto creado y visible en la tienda."
+      );
+      return;
+    }
     if (!persist(next)) throw new Error("No se guardaron los cambios. Inténtalo de nuevo.");
     notify(
       type === "product" && !record
@@ -886,7 +977,7 @@ export function Admin() {
   };
 
   // Elimina entidades solo cuando sus relaciones no dejan registros huérfanos.
-  const removeRecord = (collection, id, label) => {
+  const removeRecord = async (collection, id, label) => {
     if (!window.confirm(`¿Eliminar ${label}? Esta acción no se puede deshacer.`)) return;
     if (
       collection === "products" &&
@@ -915,6 +1006,19 @@ export function Admin() {
           details: recommendedProductIds.length ? { ...details, recommendedProductIds } : details,
         };
       });
+      try {
+        await deleteAdminProduct(id);
+      } catch (error) {
+        console.error("No se pudo eliminar el producto del backend.", error);
+        notify(
+          error instanceof Error ? error.message : "No se pudo eliminar el producto.",
+          "error"
+        );
+        return;
+      }
+      setData(next);
+      notify(`${label} eliminado.`);
+      return;
     }
     if (persist(next)) notify(`${label} eliminado.`);
   };
@@ -1025,14 +1129,25 @@ export function Admin() {
     if (persist(next)) notify("Venta anulada; el inventario fue restaurado.");
   };
 
+  if (!authReady)
+    return (
+      <main className="grid min-h-screen place-items-center bg-paper px-5">
+        <p className="text-sm text-muted" role="status">
+          Comprobando la sesión de administrador...
+        </p>
+      </main>
+    );
+
   if (!authenticated)
     return (
       <AdminLogin
         onLogin={login}
         notice={
-          <p className="mt-4 text-center text-[.68rem] text-muted">
-            Prototipo local: esta sesión no ofrece seguridad real.
-          </p>
+          authNotice ? (
+            <p className="mt-4 text-center text-sm text-[#9d5144]" role="alert">
+              {authNotice}
+            </p>
+          ) : null
         }
       />
     );
@@ -1290,7 +1405,7 @@ export function Admin() {
               <td>
                 {actions(
                   () => openForm("category", name),
-                  () => {
+                  async () => {
                     if (data.products.some((product) => product.category === name)) {
                       notify(
                         "No se puede eliminar una categoría que tiene productos asignados.",
@@ -1299,10 +1414,21 @@ export function Admin() {
                       return;
                     }
                     if (!window.confirm(`¿Eliminar la categoría "${name}"?`)) return;
-                    persist({
-                      ...data,
-                      categories: data.categories.filter((item) => item !== name),
-                    });
+                    try {
+                      await deleteAdminCategory(name);
+                      setData((current) => ({
+                        ...current,
+                        categories: current.categories.filter((item) => item !== name),
+                      }));
+                      notify("Categoría eliminada del catálogo.");
+                    } catch (error) {
+                      notify(
+                        error instanceof Error
+                          ? error.message
+                          : "No se pudo eliminar la categoría.",
+                        "error"
+                      );
+                    }
                   }
                 )}
               </td>
@@ -1610,9 +1736,14 @@ export function Admin() {
             <button
               className="grid h-10 w-10 place-items-center rounded-full bg-[#e5eadf] text-xs font-bold text-leaf"
               aria-label="Cerrar sesión"
-              onClick={() => {
-                sessionStorage.removeItem(SESSION_KEY);
-                setAuthenticated(false);
+              onClick={async () => {
+                try {
+                  await logoutAdmin();
+                  setAuthenticated(false);
+                } catch (error) {
+                  console.error("No se pudo cerrar la sesión de Admin.", error);
+                  notify("No se pudo cerrar la sesión con el servidor.", "error");
+                }
               }}
             >
               AD
@@ -1622,8 +1753,8 @@ export function Admin() {
         <div className="flex items-start gap-3 border-b border-[#eadcc3] bg-[#fbf3e4] px-5 py-3 text-xs leading-5 text-[#755a30] sm:px-8">
           <span>ⓘ</span>
           <p>
-            <strong>Prototipo local.</strong> Esta sesión no ofrece seguridad real; los datos se
-            guardan en este navegador y no se sincronizan con otros clientes.
+            <strong>Sesión validada por el servidor.</strong> Los datos del panel todavía se guardan
+            en este navegador y no se sincronizan con otros clientes.
           </p>
         </div>
         <main className="mx-auto max-w-[1500px] p-5 sm:p-8">{content}</main>
