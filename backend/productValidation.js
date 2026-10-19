@@ -21,52 +21,45 @@ export class CategoryValidationError extends Error {
 }
 
 /**
- * Valida el nombre de una categoría y evita duplicados en el catálogo actual.
+ * Valida los datos editoriales de una categoría nueva y evita duplicados.
  * @param {unknown} value Cuerpo JSON enviado por el cliente.
  * @param {import("../src/JS/models.js").Catalog} catalog Catálogo actual con categorías ya persistidas.
- * @returns {string} Nombre normalizado y válido.
+ * @returns {import("../src/JS/models.js").Category} Categoría normalizada y válida.
  */
 export function validateCategoryCreate(value, catalog) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new CategoryValidationError("El cuerpo debe ser un objeto de categoría.");
-  }
-
-  const name = requiredText(value.name, "La categoría", 60);
+  const category = validateCategory(value);
   if (
     catalog.categories.some(
-      (category) => category.toLocaleLowerCase("es-MX") === name.toLocaleLowerCase("es-MX")
+      (existing) =>
+        existing.name.toLocaleLowerCase("es-MX") === category.name.toLocaleLowerCase("es-MX")
     )
   ) {
     throw new CategoryValidationError("Ya existe una categoría con ese nombre.");
   }
 
-  return name;
+  return category;
 }
 
 /**
- * Valida el renombrado de una categoría y permite conservar la misma ruta si no cambia.
+ * Valida el cambio de los campos de una categoría existente.
  * @param {string} currentName Nombre actual que se está renombrando.
  * @param {unknown} value Cuerpo JSON enviado por el cliente.
  * @param {import("../src/JS/models.js").Catalog} catalog Catálogo actual.
- * @returns {string} Nombre nuevo validado.
+ * @returns {import("../src/JS/models.js").Category} Categoría nueva validada.
  */
 export function validateCategoryRename(currentName, value, catalog) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new CategoryValidationError("El cuerpo debe ser un objeto de categoría.");
-  }
-
-  const name = requiredText(value.name, "La categoría", 60);
+  const category = validateCategory(value);
   if (
     catalog.categories.some(
-      (category) =>
-        category !== currentName &&
-        category.toLocaleLowerCase("es-MX") === name.toLocaleLowerCase("es-MX")
+      (existing) =>
+        existing.name !== currentName &&
+        existing.name.toLocaleLowerCase("es-MX") === category.name.toLocaleLowerCase("es-MX")
     )
   ) {
     throw new CategoryValidationError("Ya existe una categoría con ese nombre.");
   }
 
-  return name;
+  return category;
 }
 
 /**
@@ -77,23 +70,37 @@ export function validateCategoryRename(currentName, value, catalog) {
  */
 export function validateCategoryDelete(categoryName, catalog) {
   const name = requiredText(categoryName, "La categoría", 60);
-  if (
-    !catalog.categories.some(
-      (category) => category.toLocaleLowerCase("es-MX") === name.toLocaleLowerCase("es-MX")
-    )
-  ) {
+  if (!catalog.categories.some((category) => category.name === name)) {
     throw new CategoryValidationError("La categoría no existe.");
   }
-  if (
-    catalog.products.some(
-      (product) => product.category.toLocaleLowerCase("es-MX") === name.toLocaleLowerCase("es-MX")
-    )
-  ) {
+  if (catalog.products.some((product) => product.category === name)) {
     throw new CategoryValidationError(
       "No se puede eliminar una categoría que tiene productos asignados."
     );
   }
   return name;
+}
+
+/**
+ * Comprueba el contrato completo de una categoría configurable desde Admin.
+ * @param {unknown} value Cuerpo JSON recibido.
+ * @returns {import("../src/JS/models.js").Category} Categoría normalizada.
+ */
+function validateCategory(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new CategoryValidationError("El cuerpo debe ser un objeto de categoría.");
+  }
+  const name = requiredText(value.name, "La categoría", 60);
+  const description = optionalText(value.description, "La descripción", 600);
+  const image = optionalText(value.image, "La imagen", 3 * 1024 * 1024);
+  const sortOrder = value.sortOrder;
+  if (typeof sortOrder !== "number" || !Number.isSafeInteger(sortOrder) || sortOrder < 1) {
+    throw new CategoryValidationError("El orden debe ser un entero igual o mayor que uno.");
+  }
+  if (image && !isValidImage(image)) {
+    throw new CategoryValidationError("La imagen debe ser una URL HTTP(S) o una imagen permitida.");
+  }
+  return { name, sortOrder, image, description };
 }
 
 /**
@@ -116,7 +123,7 @@ export function validateProductUpdate(productId, value, catalog) {
   const price = body.price;
   const stock = body.stock;
 
-  if (!catalog.categories.includes(category)) {
+  if (!catalog.categories.some((item) => item.name === category)) {
     throw new ProductValidationError("La categoría no existe.");
   }
   if (
@@ -131,7 +138,7 @@ export function validateProductUpdate(productId, value, catalog) {
   if (typeof price !== "number" || !Number.isFinite(price) || price <= 0) {
     throw new ProductValidationError("El precio debe ser un número mayor que cero.");
   }
-  if (typeof stock !== "number" || !Number.isInteger(stock) || stock < 0) {
+  if (typeof stock !== "number" || !Number.isSafeInteger(stock) || stock < 0) {
     throw new ProductValidationError("Las existencias deben ser un entero no negativo.");
   }
 
@@ -295,7 +302,7 @@ function isValidReview(review) {
  * Acepta imágenes vacías, URL HTTP(S) y data URL base64 dentro del límite.
  * @param {string} image Texto de imagen cuyo tamaño ya fue validado.
  */
-function isValidImage(image) {
+export function isValidImage(image) {
   if (/^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/.test(image)) {
     return true;
   }

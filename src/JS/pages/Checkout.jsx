@@ -1,100 +1,71 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CART_KEY, CATALOG_CHANGE_KEY, loadCart, saveCart } from "../services/catalogStorage.js";
 import { fetchPublicCatalog } from "../services/catalogApi.js";
+import { createCustomerOrder, readCustomerSession } from "../services/customerApi.js";
 import { money } from "../shared/format.js";
 import { Brand, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
-/** Pasos disponibles del checkout y su etiqueta para la barra de progreso. */
+const emptyAddress = {
+  name: "",
+  street: "",
+  city: "",
+  region: "",
+  postalCode: "",
+  phone: "",
+};
+
 const steps = [
   { id: "review", title: "Resumen" },
-  { id: "address", title: "Dirección" },
-  { id: "payment", title: "Pago" },
+  { id: "address", title: "Entrega" },
 ];
 
 /**
- * Muestra el paso activo y los pasos siguientes del proceso de compra.
- * @param {{active: string}} props Identificador del paso actual.
- */
-function StepProgress({ active }) {
-  const activeIndex = steps.findIndex((step) => step.id === active);
-  return (
-    <ol className="mb-8 grid grid-cols-3 border-b border-line pb-5">
-      {steps.map((step, index) => (
-        <li
-          key={step.id}
-          className={`flex items-center gap-2 text-xs sm:gap-3 sm:text-sm ${index <= activeIndex ? "font-semibold text-leaf" : "text-muted"}`}
-          aria-current={step.id === active ? "step" : undefined}
-        >
-          <span
-            className={`grid h-8 w-8 place-items-center rounded-full border ${index <= activeIndex ? "border-leaf bg-leaf text-white" : "border-line"}`}
-          >
-            {index + 1}
-          </span>
-          {step.title}
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-/**
- * Presenta subtotales e informa cuáles cargos se calculan fuera del prototipo.
- * @param {{items: Array<import("../models.js").Product & {quantity: number}>, subtotal: number}} props Importe y artículos.
+ * Resume el importe de los productos. El backend calculará el valor final al recibir el pedido.
  */
 function SummaryCard({ items, subtotal }) {
   return (
     <aside className="card h-max p-5 sm:p-6">
-      <h2 className="font-display text-xl">Resumen de cobro</h2>
+      <h2 className="font-display text-xl">Resumen del pedido</h2>
       <dl className="mt-5 grid gap-4 text-sm">
         <div className="flex justify-between">
-          <dt className="text-muted">Subtotal de artículos</dt>
+          <dt className="text-muted">Productos</dt>
           <dd>{money(subtotal)}</dd>
         </div>
         <div className="flex justify-between">
           <dt className="text-muted">Envío</dt>
-          <dd>Por calcular</dd>
-        </div>
-        <div className="flex justify-between">
-          <dt className="text-muted">Impuestos</dt>
-          <dd>Por calcular</dd>
+          <dd>Por confirmar</dd>
         </div>
       </dl>
       <div className="mt-5 flex justify-between border-t border-line pt-5">
-        <strong>Total de artículos</strong>
+        <strong>Total estimado</strong>
         <strong className="text-lg">{money(subtotal)}</strong>
       </div>
-      <p className="mt-4 text-xs leading-5 text-muted">
-        El total final se confirmará con la dirección y los cargos aplicables.
+      <p className="mt-4 rounded bg-paper p-3 text-xs leading-5 text-muted">
+        Este pedido no genera un cobro ni reserva existencias. Admin confirmará la disponibilidad
+        antes de descontar el inventario.
       </p>
-      <p className="mt-4 rounded bg-paper p-3 text-[.7rem] leading-5 text-muted">
-        Prototipo visual: no se recopilan ni transmiten datos bancarios y no se realiza ningún
-        cobro.
+      <p className="mt-3 text-xs leading-5 text-muted">
+        No ingreses datos de tarjeta: esta tienda aún no procesa pagos.
       </p>
     </aside>
   );
 }
 
-/** Gestiona revisión del carrito, dirección y validación visual del método de pago. */
+/** Revisa el carrito y registra un pedido pendiente, sin procesar pagos ni reservar existencias. */
 export function Checkout() {
   const [catalog, setCatalog] = useState({ products: [], categories: [] });
   const [catalogStatus, setCatalogStatus] = useState("loading");
   const [cart, setCart] = useState([]);
+  const [customerStatus, setCustomerStatus] = useState("checking");
+  const [customer, setCustomer] = useState(null);
   const [step, setStep] = useState("review");
   const [confirmed, setConfirmed] = useState(false);
-  const [address, setAddress] = useState({
-    name: "",
-    street: "",
-    city: "",
-    region: "",
-    postalCode: "",
-    phone: "",
-  });
-  const [paymentMethod, setPaymentMethod] = useState("");
-  const [expiry, setExpiry] = useState("");
-  const [message, setMessage] = useState("");
-  const { notify, region } = useNotice();
-  // Una marca de sesión local solo controla la vista; no reemplaza autenticación real.
-  const authenticated = sessionStorage.getItem("amway-customer-authenticated") === "true";
+  const [address, setAddress] = useState(emptyAddress);
+  const [order, setOrder] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const { notify, region: noticeRegion } = useNotice();
+
   const items = useMemo(
     () =>
       cart
@@ -107,7 +78,6 @@ export function Checkout() {
   );
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  // Consulta al backend y limita el carrito a los productos e inventario vigentes.
   const refreshCatalog = useCallback(async () => {
     setCatalogStatus("loading");
     try {
@@ -115,8 +85,6 @@ export function Checkout() {
       const nextCart = loadCart(nextCatalog.products);
       setCatalog(nextCatalog);
       setCart(nextCart);
-      setConfirmed(false);
-      if (!nextCart.length) setStep("review");
       setCatalogStatus("ready");
     } catch (error) {
       console.error("No se pudo cargar el catálogo del backend para Checkout.", error);
@@ -124,11 +92,30 @@ export function Checkout() {
     }
   }, []);
 
+  const refreshCustomerSession = useCallback(async () => {
+    setCustomerStatus("checking");
+    try {
+      const profile = await readCustomerSession();
+      setCustomer(profile);
+      setCustomerStatus(profile ? "authenticated" : "unauthenticated");
+      if (profile) {
+        setAddress((current) => ({
+          ...current,
+          name: current.name || profile.name,
+          phone: current.phone || profile.phone,
+        }));
+      }
+    } catch (error) {
+      console.error("No se pudo comprobar la sesión de cliente en Checkout.", error);
+      setCustomerStatus("error");
+    }
+  }, []);
+
   useEffect(() => {
     refreshCatalog();
-  }, [refreshCatalog]);
+    refreshCustomerSession();
+  }, [refreshCatalog, refreshCustomerSession]);
 
-  // Recarga el catálogo si el carrito cambia en otra pestaña.
   const handleStorageChange = useCallback(
     (event) => {
       if (event.key === CART_KEY || event.key === CATALOG_CHANGE_KEY || event.key === null) {
@@ -139,7 +126,6 @@ export function Checkout() {
   );
   useCrossTabStorage(handleStorageChange);
 
-  // Ajusta o elimina una línea y exige confirmar de nuevo el resumen si cambia.
   const updateCart = (id, amount) => {
     const product = catalog.products.find((item) => item.id === id);
     const quantity = cart.find((item) => item.id === id)?.quantity || 0;
@@ -158,20 +144,70 @@ export function Checkout() {
     }
     setCart(nextCart);
     setConfirmed(false);
+    setErrorMessage("");
   };
 
-  // Inserta automáticamente la diagonal al escribir el vencimiento MM/AA.
-  const formatExpiry = (value, cursor) => {
-    const digits = value.replace(/\D/g, "").slice(0, 4);
-    const formatted = digits.length >= 2 ? `${digits.slice(0, 2)}/${digits.slice(2)}` : digits;
-    const count = value.slice(0, cursor).replace(/\D/g, "").length;
-    return {
-      formatted,
-      position: Math.min(count + (count >= 2 && digits.length >= 2 ? 1 : 0), formatted.length),
-    };
+  const createOrder = async (event) => {
+    event.preventDefault();
+    if (!customer || busy || items.length === 0) return;
+    setBusy(true);
+    setErrorMessage("");
+    try {
+      const savedOrder = await createCustomerOrder({
+        address,
+        items: items.map(({ id, quantity }) => ({ productId: id, quantity })),
+      });
+      if (!saveCart([])) {
+        notify("El pedido se guardó, pero no se pudo vaciar el carrito local.", "error");
+      }
+      setCart([]);
+      setOrder(savedOrder);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo crear el pedido.");
+    } finally {
+      setBusy(false);
+    }
   };
 
-  if (!authenticated)
+  const goToLogin = () => {
+    sessionStorage.setItem("amway-checkout-after-login", "true");
+    window.location.href = "./#iniciar-sesion";
+  };
+
+  if (customerStatus === "checking" || customerStatus === "error") {
+    return (
+      <div className="min-h-screen bg-paper">
+        <header className="border-b border-line bg-white">
+          <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
+            <Brand to="./#inicio" />
+            <a href="./#todos-productos" className="text-xs font-semibold text-leaf">
+              Seguir comprando
+            </a>
+          </div>
+        </header>
+        <main className="mx-auto max-w-xl px-5 py-20 text-center">
+          {customerStatus === "checking" ? (
+            <p className="text-sm text-muted" role="status">
+              Comprobando tu sesión...
+            </p>
+          ) : (
+            <>
+              <h1 className="font-display text-3xl">No pudimos comprobar tu sesión</h1>
+              <p className="mt-3 text-sm text-muted">
+                Comprueba que el backend esté ejecutándose y vuelve a intentar.
+              </p>
+              <button className="btn-primary mt-6" onClick={refreshCustomerSession}>
+                Intentar de nuevo
+              </button>
+            </>
+          )}
+        </main>
+        {noticeRegion}
+      </div>
+    );
+  }
+
+  if (customerStatus === "unauthenticated") {
     return (
       <div className="min-h-screen bg-paper px-5 py-10">
         <header className="mx-auto flex max-w-6xl items-center justify-between">
@@ -189,310 +225,267 @@ export function Checkout() {
           </p>
           <h1 className="mt-2 font-display text-3xl">Inicia sesión para continuar</h1>
           <p className="mt-3 text-sm leading-6 text-muted">
-            Necesitas una cuenta y una sesión verificada para acceder al checkout. La autenticación
-            aún no está conectada; no ingreses contraseñas hasta que esté habilitada.
+            Para crear un pedido necesitas una cuenta. Tu carrito se conservará al iniciar sesión.
           </p>
-          <a href="./#iniciar-sesion" className="btn-primary mt-7">
-            Ir a iniciar sesión <span aria-hidden="true">→</span>
-          </a>
-          <p className="mt-5 text-xs leading-5 text-muted">
-            Este prototipo no procesa pagos reales ni transmite datos personales.
+          <button className="btn-primary mt-7" onClick={goToLogin}>
+            Iniciar sesión <span aria-hidden="true">→</span>
+          </button>
+          <p className="mt-5 text-sm text-muted">
+            ¿Aún no tienes cuenta?{" "}
+            <button
+              className="font-semibold text-leaf underline underline-offset-4"
+              onClick={() => {
+                sessionStorage.setItem("amway-checkout-after-login", "true");
+                window.location.href = "./#crear-cuenta";
+              }}
+            >
+              Crear cuenta
+            </button>
           </p>
         </main>
-        {region}
+        {noticeRegion}
       </div>
     );
+  }
 
-  // Cada sección aparece de acuerdo con el paso del flujo de compra seleccionado.
   return (
     <div className="min-h-screen bg-paper">
       <div className="bg-leaf px-4 py-2 text-center text-[.7rem] tracking-widest text-white">
-        COMPRA SEGURA · PROTOTIPO
+        PEDIDO EN LÍNEA · SIN PROCESAMIENTO DE PAGO
       </div>
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Brand to="./#inicio" />
-          <span className="hidden text-xs text-muted sm:block">Finaliza tu compra</span>
+          <span className="hidden text-xs text-muted sm:block">Sesión: {customer?.name}</span>
           <a href="./#todos-productos" className="text-xs font-semibold text-leaf">
             Seguir comprando
           </a>
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-5 py-8 sm:py-12">
-        <div className="mb-8 max-w-2xl">
-          <p className="text-xs font-bold uppercase tracking-[.2em] text-[#72805a]">
-            Finaliza tu compra
-          </p>
-          <h1 className="mt-2 font-display text-4xl">
-            {steps.find((item) => item.id === step)?.title}
-          </h1>
-          <p className="mt-2 text-sm leading-6 text-muted">
-            Revisa tus artículos, confirma la entrega y elige cómo deseas pagar.
-          </p>
-        </div>
-        <StepProgress active={step} />
-        {catalogStatus === "loading" ? (
-          <p className="card p-10 text-center text-muted" role="status">
-            Comprobando productos y existencias...
-          </p>
-        ) : catalogStatus === "error" ? (
-          <div className="card p-10 text-center" role="alert">
-            <h2 className="font-display text-2xl">No pudimos comprobar los productos</h2>
-            <p className="mt-2 text-sm text-muted">
-              Verifica que el backend esté ejecutándose antes de continuar.
+        {order ? (
+          <section className="card mx-auto max-w-2xl p-8 text-center sm:p-12">
+            <span className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-[#e8f2e9] text-2xl text-[#2f855a]">
+              ✓
+            </span>
+            <p className="mt-5 text-xs font-bold uppercase tracking-[.2em] text-[#72805a]">
+              Pedido registrado
             </p>
-            <button className="btn-primary mt-5" onClick={refreshCatalog}>
-              Intentar de nuevo
-            </button>
-          </div>
-        ) : !items.length ? (
-          <div className="card p-10 text-center">
-            <h2 className="font-display text-2xl">Tu carrito está vacío</h2>
-            <p className="mt-2 text-sm text-muted">Agrega productos antes de continuar.</p>
-            <a href="./#todos-productos" className="btn-primary mt-5">
-              Explorar productos
+            <h1 className="mt-2 font-display text-3xl">Gracias, {order.shippingAddress.name}</h1>
+            <p className="mt-4 text-sm leading-6 text-muted">
+              Tu pedido <strong>{order.id.slice(-8).toUpperCase()}</strong> está pendiente de
+              confirmación. El equipo revisará existencias antes de confirmarlo. Todavía no se
+              realizó ningún cobro y el inventario no se ha descontado.
+            </p>
+            <div className="mt-6 flex justify-center gap-8 text-sm">
+              <span>{order.items.reduce((count, item) => count + item.quantity, 0)} artículos</span>
+              <strong>{money(order.total)}</strong>
+            </div>
+            <a href="./#inicio" className="btn-primary mt-8">
+              Volver a la tienda
             </a>
-          </div>
+          </section>
         ) : (
           <>
-            {step === "review" && (
-              <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
-                <section className="card p-5 sm:p-7">
-                  <h2 className="font-display text-2xl">Resumen de artículos</h2>
-                  <div className="mt-4 divide-y divide-line">
-                    {items.map((item) => (
-                      <article
-                        key={item.id}
-                        className="grid grid-cols-[4.5rem_1fr_auto] gap-4 py-4"
-                      >
-                        <img
-                          className="h-[4.5rem] w-[4.5rem] rounded object-cover"
-                          src={item.image}
-                          alt=""
-                        />
-                        <div>
-                          <h3 className="font-semibold">{item.name}</h3>
-                          <p className="mt-1 text-xs text-muted">{money(item.price)} c/u</p>
-                          <div className="mt-2 inline-flex items-center border border-line">
-                            <button
-                              className="h-7 w-8"
-                              disabled={item.quantity <= 1}
-                              onClick={() => updateCart(item.id, -1)}
-                              aria-label="Quitar una unidad"
-                            >
-                              −
-                            </button>
-                            <span className="min-w-7 text-center text-sm">{item.quantity}</span>
-                            <button
-                              className="h-7 w-8"
-                              disabled={item.quantity >= item.stock}
-                              onClick={() => updateCart(item.id, 1)}
-                              aria-label="Agregar una unidad"
-                            >
-                              +
-                            </button>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <strong className="text-sm">{money(item.price * item.quantity)}</strong>
-                          <button
-                            className="mt-3 block text-xs text-[#9d5144] underline"
-                            onClick={() => updateCart(item.id, 0)}
-                          >
-                            Eliminar
-                          </button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                  <label className="mt-5 flex cursor-pointer items-start gap-3 rounded bg-paper p-4 text-sm">
-                    <input
-                      className="mt-1 accent-[#25483b]"
-                      type="checkbox"
-                      checked={confirmed}
-                      onChange={(event) => setConfirmed(event.target.checked)}
-                    />
-                    <span>Confirmo que revisé los artículos y el resumen de cobro.</span>
-                  </label>
-                  <button
-                    className="btn-primary mt-5 w-full sm:w-auto"
-                    disabled={!confirmed}
-                    onClick={() => setStep("address")}
+            <div className="mb-8 max-w-2xl">
+              <p className="text-xs font-bold uppercase tracking-[.2em] text-[#72805a]">
+                Finaliza tu compra
+              </p>
+              <h1 className="mt-2 font-display text-4xl">
+                {steps.find((item) => item.id === step)?.title}
+              </h1>
+              <p className="mt-2 text-sm leading-6 text-muted">
+                Revisa tus artículos y los datos de entrega para registrar un pedido pendiente.
+              </p>
+            </div>
+            <ol className="mb-8 grid grid-cols-2 border-b border-line pb-5">
+              {steps.map((item, index) => {
+                const activeIndex = steps.findIndex((current) => current.id === step);
+                return (
+                  <li
+                    key={item.id}
+                    className={`flex items-center gap-2 text-xs sm:gap-3 sm:text-sm ${
+                      index <= activeIndex ? "font-semibold text-leaf" : "text-muted"
+                    }`}
+                    aria-current={item.id === step ? "step" : undefined}
                   >
-                    Continuar a dirección <span aria-hidden="true">→</span>
-                  </button>
-                </section>
-                <SummaryCard items={items} subtotal={subtotal} />
-              </div>
-            )}
-            {step === "address" && (
-              <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
-                <form
-                  className="card p-5 sm:p-7"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setStep("payment");
-                  }}
-                >
-                  <h2 className="font-display text-2xl">Dirección de entrega</h2>
-                  <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                    {[
-                      ["name", "Nombre completo", "text"],
-                      ["street", "Calle y número", "text"],
-                      ["city", "Ciudad", "text"],
-                      ["region", "Estado o provincia", "text"],
-                      ["postalCode", "Código postal", "text"],
-                      ["phone", "Teléfono de contacto", "tel"],
-                    ].map(([field, label, type]) => (
-                      <label
-                        key={field}
-                        className={field === "name" || field === "street" ? "sm:col-span-2" : ""}
-                      >
-                        <span className="label">{label}</span>
-                        <input
-                          className="input"
-                          type={type}
-                          autoComplete={
-                            field === "street"
-                              ? "street-address"
-                              : field === "postalCode"
-                                ? "postal-code"
-                                : field
-                          }
-                          value={address[field]}
-                          required
-                          onChange={(event) =>
-                            setAddress({ ...address, [field]: event.target.value })
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-                  <div className="mt-7 flex flex-col-reverse justify-between gap-3 sm:flex-row">
-                    <button
-                      className="btn-secondary"
-                      type="button"
-                      onClick={() => setStep("review")}
+                    <span
+                      className={`grid h-8 w-8 place-items-center rounded-full border ${
+                        index <= activeIndex ? "border-leaf bg-leaf text-white" : "border-line"
+                      }`}
                     >
-                      ← Volver al resumen
-                    </button>
-                    <button className="btn-primary" type="submit">
-                      Continuar al pago →
-                    </button>
-                  </div>
-                </form>
-                <SummaryCard items={items} subtotal={subtotal} />
+                      {index + 1}
+                    </span>
+                    {item.title}
+                  </li>
+                );
+              })}
+            </ol>
+            {catalogStatus === "loading" ? (
+              <p className="card p-10 text-center text-muted" role="status">
+                Comprobando productos y existencias...
+              </p>
+            ) : catalogStatus === "error" ? (
+              <div className="card p-10 text-center" role="alert">
+                <h2 className="font-display text-2xl">No pudimos comprobar los productos</h2>
+                <p className="mt-2 text-sm text-muted">
+                  Verifica que el backend esté ejecutándose antes de continuar.
+                </p>
+                <button className="btn-primary mt-5" onClick={refreshCatalog}>
+                  Intentar de nuevo
+                </button>
               </div>
-            )}
-            {step === "payment" && (
-              <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
-                <form
-                  className="card p-5 sm:p-7"
-                  onSubmit={(event) => {
-                    event.preventDefault();
-                    setMessage(
-                      "Datos validados en este prototipo. No se guardaron ni enviaron datos y no se realizó ningún cobro."
-                    );
-                  }}
-                >
-                  <h2 className="font-display text-2xl">Método de pago</h2>
-                  <fieldset className="mt-5 grid gap-3">
-                    <legend className="label mb-3">Selecciona cómo deseas pagar</legend>
-                    {[
-                      ["card", "Tarjeta de crédito o débito"],
-                      ["transfer", "Transferencia bancaria"],
-                      ["cash", "Pago contra entrega"],
-                    ].map(([value, label]) => (
-                      <label
-                        key={value}
-                        className="flex cursor-pointer items-center gap-3 rounded border border-line p-4 hover:bg-paper"
+            ) : !items.length ? (
+              <div className="card p-10 text-center">
+                <h2 className="font-display text-2xl">Tu carrito está vacío</h2>
+                <p className="mt-2 text-sm text-muted">Agrega productos antes de continuar.</p>
+                <a href="./#todos-productos" className="btn-primary mt-5">
+                  Explorar productos
+                </a>
+              </div>
+            ) : (
+              <>
+                {step === "review" && (
+                  <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
+                    <section className="card p-5 sm:p-7">
+                      <h2 className="font-display text-2xl">Resumen de artículos</h2>
+                      <div className="mt-4 divide-y divide-line">
+                        {items.map((item) => (
+                          <article
+                            key={item.id}
+                            className="grid grid-cols-[4.5rem_1fr_auto] gap-4 py-4"
+                          >
+                            <img
+                              className="h-[4.5rem] w-[4.5rem] rounded object-cover"
+                              src={item.image}
+                              alt=""
+                            />
+                            <div>
+                              <h3 className="font-semibold">{item.name}</h3>
+                              <p className="mt-1 text-xs text-muted">{money(item.price)} c/u</p>
+                              <div className="mt-2 inline-flex items-center border border-line">
+                                <button
+                                  className="h-7 w-8"
+                                  disabled={item.quantity <= 1}
+                                  onClick={() => updateCart(item.id, -1)}
+                                  aria-label="Quitar una unidad"
+                                >
+                                  −
+                                </button>
+                                <span className="min-w-7 text-center text-sm">{item.quantity}</span>
+                                <button
+                                  className="h-7 w-8"
+                                  disabled={item.quantity >= item.stock}
+                                  onClick={() => updateCart(item.id, 1)}
+                                  aria-label="Agregar una unidad"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <strong className="text-sm">
+                                {money(item.price * item.quantity)}
+                              </strong>
+                              <button
+                                className="mt-3 block text-xs text-[#9d5144] underline"
+                                onClick={() => updateCart(item.id, 0)}
+                              >
+                                Eliminar
+                              </button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                      <label className="mt-5 flex cursor-pointer items-start gap-3 rounded bg-paper p-4 text-sm">
+                        <input
+                          className="mt-1 accent-[#25483b]"
+                          type="checkbox"
+                          checked={confirmed}
+                          onChange={(event) => setConfirmed(event.target.checked)}
+                        />
+                        <span>Confirmo que revisé los artículos y el total estimado.</span>
+                      </label>
+                      <button
+                        className="btn-primary mt-5 w-full sm:w-auto"
+                        disabled={!confirmed}
+                        onClick={() => setStep("address")}
                       >
-                        <input
-                          type="radio"
-                          name="paymentMethod"
-                          value={value}
-                          checked={paymentMethod === value}
-                          required
-                          onChange={() => setPaymentMethod(value)}
-                          className="accent-[#25483b]"
-                        />
-                        <span className="text-sm font-medium">{label}</span>
-                      </label>
-                    ))}
-                  </fieldset>
-                  {paymentMethod === "card" && (
-                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                      <label className="sm:col-span-2">
-                        <span className="label">Nombre en la tarjeta</span>
-                        <input className="input" autoComplete="cc-name" required />
-                      </label>
-                      <label className="sm:col-span-2">
-                        <span className="label">Número de tarjeta</span>
-                        <input
-                          className="input"
-                          inputMode="numeric"
-                          autoComplete="cc-number"
-                          maxLength="19"
-                          required
-                        />
-                      </label>
-                      <label>
-                        <span className="label">Vencimiento (MM/AA)</span>
-                        <input
-                          className="input"
-                          value={expiry}
-                          inputMode="numeric"
-                          autoComplete="cc-exp"
-                          placeholder="MM/AA"
-                          maxLength="5"
-                          required
-                          onChange={(event) => {
-                            const cursor = event.target.selectionStart || 0;
-                            const result = formatExpiry(event.target.value, cursor);
-                            setExpiry(result.formatted);
-                            requestAnimationFrame(() =>
-                              event.target.setSelectionRange(result.position, result.position)
-                            );
-                          }}
-                        />
-                      </label>
-                      <label>
-                        <span className="label">CVV</span>
-                        <input
-                          className="input"
-                          inputMode="numeric"
-                          autoComplete="cc-csc"
-                          maxLength="4"
-                          required
-                        />
-                      </label>
-                    </div>
-                  )}
-                  <div className="mt-7 flex flex-col-reverse justify-between gap-3 sm:flex-row">
-                    <button
-                      className="btn-secondary"
-                      type="button"
-                      onClick={() => setStep("address")}
-                    >
-                      ← Volver a dirección
-                    </button>
-                    <button className="btn-primary" type="submit">
-                      Confirmar datos de pago
-                    </button>
+                        Continuar a entrega <span aria-hidden="true">→</span>
+                      </button>
+                    </section>
+                    <SummaryCard items={items} subtotal={subtotal} />
                   </div>
-                  {message && (
-                    <p className="mt-4 rounded bg-[#eff2e7] p-4 text-sm text-leaf" role="status">
-                      {message}
-                    </p>
-                  )}
-                </form>
-                <SummaryCard items={items} subtotal={subtotal} />
-              </div>
+                )}
+                {step === "address" && (
+                  <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
+                    <form className="card p-5 sm:p-7" onSubmit={createOrder}>
+                      <h2 className="font-display text-2xl">Dirección de entrega</h2>
+                      <p className="mt-2 text-sm text-muted">
+                        Recibirás un pedido pendiente. No se te cobrará en este paso.
+                      </p>
+                      <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                        {[
+                          ["name", "Nombre completo", "text", "name", 120],
+                          ["street", "Calle y número", "text", "street-address", 200],
+                          ["city", "Ciudad", "text", "address-level2", 100],
+                          ["region", "Estado o provincia", "text", "address-level1", 100],
+                          ["postalCode", "Código postal", "text", "postal-code", 20],
+                          ["phone", "Teléfono de contacto", "tel", "tel", 40],
+                        ].map(([field, label, type, autoComplete, maxLength]) => (
+                          <label
+                            key={field}
+                            className={
+                              field === "name" || field === "street" ? "sm:col-span-2" : ""
+                            }
+                          >
+                            <span className="label">{label}</span>
+                            <input
+                              className="input"
+                              type={type}
+                              autoComplete={autoComplete}
+                              value={address[field]}
+                              maxLength={maxLength}
+                              required
+                              onChange={(event) =>
+                                setAddress((current) => ({
+                                  ...current,
+                                  [field]: event.target.value,
+                                }))
+                              }
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      {errorMessage && (
+                        <p className="mt-4 text-sm text-[#9d5144]" role="alert">
+                          {errorMessage}
+                        </p>
+                      )}
+                      <div className="mt-7 flex flex-col-reverse justify-between gap-3 sm:flex-row">
+                        <button
+                          className="btn-secondary"
+                          type="button"
+                          onClick={() => setStep("review")}
+                          disabled={busy}
+                        >
+                          ← Volver al resumen
+                        </button>
+                        <button className="btn-primary" type="submit" disabled={busy}>
+                          {busy ? "Guardando pedido..." : "Crear pedido"}{" "}
+                          <span aria-hidden="true">→</span>
+                        </button>
+                      </div>
+                    </form>
+                    <SummaryCard items={items} subtotal={subtotal} />
+                  </div>
+                )}
+              </>
             )}
           </>
         )}
       </main>
-      {region}
+      {noticeRegion}
     </div>
   );
 }

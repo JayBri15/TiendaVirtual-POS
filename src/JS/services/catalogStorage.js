@@ -4,7 +4,9 @@ import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from "../data/defaultCatalog.js"
 export const DATA_KEY = "amway-admin-demo-data-v1";
 export const CART_KEY = "amway-demo-cart-v1";
 export const CATALOG_CHANGE_KEY = "amway-public-catalog-updated-v1";
+export const ADMIN_DATA_CHANGE_KEY = "amway-admin-data-updated-v1";
 let catalogChangeSequence = 0;
+let adminDataChangeSequence = 0;
 
 /** Notifica a otras pestañas que deben volver a leer el catálogo del servidor. */
 export function announceCatalogChange() {
@@ -13,6 +15,16 @@ export function announceCatalogChange() {
     localStorage.setItem(CATALOG_CHANGE_KEY, `${Date.now()}-${catalogChangeSequence}`);
   } catch (error) {
     console.error("No se pudo avisar a otras pestañas que cambió el catálogo.", error);
+  }
+}
+
+/** Avisa a otras pestañas Admin que deben releer clientes e historial de ventas. */
+export function announceAdminDataChange() {
+  try {
+    adminDataChangeSequence += 1;
+    localStorage.setItem(ADMIN_DATA_CHANGE_KEY, `${Date.now()}-${adminDataChangeSequence}`);
+  } catch (error) {
+    console.error("No se pudo avisar a otras pestañas que cambiaron los datos de Admin.", error);
   }
 }
 
@@ -134,7 +146,23 @@ export function isValidCatalog(value) {
   if (!value || typeof value !== "object") return false;
   const { products, categories } = value;
   if (!Array.isArray(products) || !Array.isArray(categories)) return false;
-  if (categories.some((category) => typeof category !== "string" || !category.trim())) return false;
+  const categoryNames = categories.map((category) =>
+    typeof category === "string" ? category : category?.name
+  );
+  const validCategories = categories.every((category) => {
+    if (typeof category === "string") return Boolean(category.trim());
+    return (
+      category &&
+      typeof category === "object" &&
+      typeof category.name === "string" &&
+      Boolean(category.name.trim()) &&
+      Number.isSafeInteger(category.sortOrder) &&
+      category.sortOrder >= 1 &&
+      typeof category.description === "string" &&
+      (category.image === "" || isValidImage(category.image))
+    );
+  });
+  if (!validCategories) return false;
 
   const validProducts = products.every(
     (product) =>
@@ -145,11 +173,11 @@ export function isValidCatalog(value) {
       Boolean(product.name.trim()) &&
       typeof product.sku === "string" &&
       Boolean(product.sku.trim()) &&
-      categories.includes(product.category) &&
+      categoryNames.includes(product.category) &&
       typeof product.detail === "string" &&
       Number.isFinite(product.price) &&
       product.price > 0 &&
-      Number.isInteger(product.stock) &&
+      Number.isSafeInteger(product.stock) &&
       product.stock >= 0 &&
       (product.badge === undefined || typeof product.badge === "string") &&
       (product.details === undefined || isValidProductDetails(product.details)) &&
@@ -163,8 +191,8 @@ export function isValidCatalog(value) {
     new Set(products.map((product) => product.sku.toLocaleLowerCase("es-MX"))).size ===
     products.length;
   const uniqueCategories =
-    new Set(categories.map((category) => category.toLocaleLowerCase("es-MX"))).size ===
-    categories.length;
+    new Set(categoryNames.map((category) => category.toLocaleLowerCase("es-MX"))).size ===
+    categoryNames.length;
   return uniqueProductIds && uniqueSkus && uniqueCategories;
 }
 
@@ -192,7 +220,17 @@ export function readCatalog() {
         badge: product.badge ?? fallback?.badge ?? "Nuevo",
       };
     });
-    return { products, categories: [...data.categories] };
+    const categories = data.categories.map((category, index) =>
+      typeof category === "string"
+        ? { name: category, sortOrder: index + 1, image: "", description: "" }
+        : {
+            sortOrder: index + 1,
+            image: "",
+            description: "",
+            ...category,
+          }
+    );
+    return { products, categories };
   } catch (error) {
     console.error("No se pudo recuperar el catálogo.", error);
     return getDefaultCatalog();
@@ -206,7 +244,7 @@ export function readCatalog() {
 export function getDefaultCatalog() {
   return {
     products: DEFAULT_PRODUCTS.map((product) => ({ ...product })),
-    categories: [...DEFAULT_CATEGORIES],
+    categories: DEFAULT_CATEGORIES.map((category) => ({ ...category })),
   };
 }
 

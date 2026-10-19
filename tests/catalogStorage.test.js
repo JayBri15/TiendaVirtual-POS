@@ -95,7 +95,7 @@ describe("servicio de catálogo y carrito", () => {
       id: "new-product",
       name: "Nuevo producto",
       sku: "NEW-001",
-      category: catalog.categories[0],
+      category: catalog.categories[0].name,
       detail: "Descripción",
       price: 12,
       stock: 4,
@@ -110,6 +110,21 @@ describe("servicio de catálogo y carrito", () => {
     assert.equal(saveCart(cart), true);
     assert.equal(localStorage.getItem(CART_KEY), JSON.stringify(cart));
     assert.deepEqual(loadCart(loaded.products), cart);
+  });
+
+  it("migra categorías antiguas guardadas como texto al modelo enriquecido", () => {
+    const legacyCatalog = getDefaultCatalog();
+    legacyCatalog.categories = legacyCatalog.categories.map((category) => category.name);
+    localStorage.setItem(DATA_KEY, JSON.stringify(legacyCatalog));
+
+    const migrated = readCatalog();
+
+    assert.deepEqual(migrated.categories[0], {
+      name: legacyCatalog.categories[0],
+      sortOrder: 1,
+      image: "",
+      description: "",
+    });
   });
 
   it("conserva los detalles personalizados en el catálogo público", () => {

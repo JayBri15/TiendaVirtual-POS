@@ -59,6 +59,15 @@
  */
 
 /**
+ * Categoría ordenable y editable que organiza productos en la tienda.
+ * @typedef {Object} Category
+ * @property {string} name Nombre público de la categoría.
+ * @property {number} sortOrder Posición ascendente en la navegación.
+ * @property {string} image URL o imagen permitida para la tarjeta de categoría.
+ * @property {string} description Descripción pública breve.
+ */
+
+/**
  * Usuario de demostración del portal administrativo.
  * @typedef {Object} AdminUser
  * @property {string} id Identificador estable del administrador.
@@ -94,10 +103,26 @@
  */
 
 /**
+ * Pedido web que captura precios, productos y entrega al momento de crearse.
+ * Los pedidos pendientes no reservan inventario; Admin lo descuenta al confirmar.
+ * @typedef {Object} Order
+ * @property {string} id Identificador estable del pedido.
+ * @property {string} date Fecha ISO de creación.
+ * @property {string|null} customerId Cuenta que creó el pedido.
+ * @property {string} customerName Nombre capturado de la cuenta.
+ * @property {{name: string, street: string, city: string, region: string, postalCode: string, phone: string}} shippingAddress Dirección de entrega capturada.
+ * @property {SaleItem[]} items Artículos, precios y nombres congelados al crear.
+ * @property {number} total Total calculado con los precios del servidor.
+ * @property {"pending"|"confirmed"|"cancelled"} status Estado del pedido.
+ * @property {string} [confirmedAt] Fecha ISO de confirmación.
+ * @property {string} [cancelledAt] Fecha ISO de cancelación.
+ */
+
+/**
  * Forma completa del documento persistido bajo la clave de Admin.
  * @typedef {Object} AdminData
  * @property {Product[]} products Catálogo público editable desde Admin.
- * @property {string[]} categories Categorías públicas del catálogo.
+ * @property {Category[]} categories Categorías públicas del catálogo.
  * @property {Customer[]} customers Registros privados del portal.
  * @property {Sale[]} sales Historial de ventas del portal.
  * @property {AdminUser[]} admins Usuarios demo del portal.
@@ -117,7 +142,7 @@
  * Estado del diálogo Admin: null cuando no se muestra ningún formulario.
  * @typedef {Object} AdminFormState
  * @property {AdminFormType} type Entidad o acción que se está editando.
- * @property {Product|Customer|AdminUser|string|null} record Registro original, si existe.
+ * @property {Product|Category|Customer|AdminUser|null} record Registro original, si existe.
  */
 
 export {};

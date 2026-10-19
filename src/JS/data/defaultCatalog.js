@@ -101,5 +101,12 @@ export const DEFAULT_PRODUCTS = [
   },
 ];
 
-/** Categorías iniciales derivadas de los productos para evitar datos repetidos. */
-export const DEFAULT_CATEGORIES = [...new Set(DEFAULT_PRODUCTS.map((product) => product.category))];
+/** Registros iniciales de categorías con el mismo contrato que la API. */
+export const DEFAULT_CATEGORIES = [
+  ...new Set(DEFAULT_PRODUCTS.map((product) => product.category)),
+].map((name, sortOrder) => ({
+  name,
+  sortOrder: sortOrder + 1,
+  image: "",
+  description: "",
+}));

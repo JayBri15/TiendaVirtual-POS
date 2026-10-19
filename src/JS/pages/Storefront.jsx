@@ -1,6 +1,15 @@
-import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { CART_KEY, CATALOG_CHANGE_KEY, loadCart, saveCart } from "../services/catalogStorage.js";
 import { fetchPublicCatalog } from "../services/catalogApi.js";
+import {
+  loginCustomer,
+  readCustomerSession,
+  registerCustomer,
+  requestCustomerPasswordReset,
+  resendCustomerVerification,
+  resetCustomerPassword,
+  verifyCustomerEmail,
+} from "../services/customerApi.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails } from "../data/productDetails.js";
 import { money } from "../shared/format.js";
@@ -336,10 +345,23 @@ function CartDrawer({ open, onClose, cart, products, onChange, onCheckout }) {
   );
 }
 
-/** Explica el requisito de cuenta y mantiene deshabilitado el acceso no autenticado. */
-function AccountGate({ mode, onBack }) {
+/** Gestiona registro, verificación, acceso y recuperación de cuentas de cliente. */
+function AccountGate({ mode, onBack, onAuthenticated }) {
   const signup = mode === "crear-cuenta";
+  const recovery = mode === "recuperar-contrasena";
+  const verifyEmail = mode.startsWith("verificar-correo/");
+  const resetMode = mode.startsWith("restablecer-contrasena/");
+  const token = mode.split("/")[1] || "";
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
+  const [flowState, setFlowState] = useState(verifyEmail ? "verifying" : "idle");
+  const [showResend, setShowResend] = useState(false);
+  const verificationRequests = useRef(new Map());
   const passwordRequirements = [
     { label: "Al menos 8 caracteres", met: password.length >= 8 },
     { label: "Una letra mayúscula", met: /[A-Z]/.test(password) },
@@ -354,6 +376,97 @@ function AccountGate({ mode, onBack }) {
       : metRequirements >= Math.ceil(passwordRequirements.length / 2)
         ? "bg-[#d69e2e]"
         : "bg-[#c53030]";
+
+  useEffect(() => {
+    if (!verifyEmail) return undefined;
+    let active = true;
+    let verificationRequest = verificationRequests.current.get(token);
+    if (!verificationRequest) {
+      verificationRequest = verifyCustomerEmail(token);
+      verificationRequests.current.set(token, verificationRequest);
+    }
+    verificationRequest
+      .then(() => {
+        if (active) setFlowState("verified");
+      })
+      .catch((error) => {
+        if (active) {
+          setErrorMessage(
+            error instanceof Error ? error.message : "No se pudo verificar el correo."
+          );
+          setFlowState("verification-error");
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [token, verifyEmail]);
+
+  const submit = async (event) => {
+    event.preventDefault();
+    setErrorMessage("");
+    if ((signup || resetMode) && password !== passwordConfirmation) {
+      setErrorMessage("Las contraseñas no coinciden.");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (signup) {
+        await registerCustomer({ name, email, phone, password });
+        setFlowState("verification-sent");
+      } else if (recovery) {
+        await requestCustomerPasswordReset(email);
+        setFlowState("reset-requested");
+      } else if (resetMode) {
+        await resetCustomerPassword(token, password);
+        setFlowState("reset-complete");
+      } else {
+        await loginCustomer(email, password);
+        onAuthenticated();
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudo completar la solicitud.";
+      setErrorMessage(message);
+      if (signup) setShowResend(true);
+      if (!signup && !recovery && !resetMode && /verifica tu correo/i.test(message)) {
+        setShowResend(true);
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const resendVerification = async () => {
+    setBusy(true);
+    setErrorMessage("");
+    try {
+      const message = await resendCustomerVerification(email);
+      setErrorMessage(message);
+      setShowResend(false);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "No se pudo reenviar el correo.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const heading = verifyEmail
+    ? "Verifica tu correo"
+    : resetMode
+      ? "Crea una contraseña nueva"
+      : recovery
+        ? "Recupera tu acceso"
+        : signup
+          ? "Crear cuenta"
+          : "Iniciar sesión";
+  const submitLabel = signup
+    ? "Crear cuenta"
+    : recovery
+      ? "Enviar instrucciones"
+      : resetMode
+        ? "Guardar contraseña"
+        : "Iniciar sesión";
+
   return (
     <main className="mx-auto grid min-h-screen max-w-5xl items-center px-5 py-16 lg:grid-cols-[.9fr_1fr]">
       <button
@@ -377,93 +490,245 @@ function AccountGate({ mode, onBack }) {
         <p className="text-xs font-bold uppercase tracking-[.2em] text-[#72805a]">
           Tu cuenta Amway
         </p>
-        <h1 className="mt-2 font-display text-4xl">{signup ? "Crear cuenta" : "Iniciar sesión"}</h1>
+        <h1 className="mt-2 font-display text-4xl">{heading}</h1>
         <p className="mt-3 text-sm leading-6 text-muted">
           {signup
-            ? "Crea una cuenta para poder comprar. "
-            : "Inicia sesión en tu cuenta para poder comprar. "}
-          El servicio de cuentas aún no está conectado. Para proteger tus datos, no guardamos
-          contraseñas en este navegador.
+            ? "Crea una cuenta y confirma que el correo te pertenece para poder comprar."
+            : recovery
+              ? "Te enviaremos un enlace temporal si existe una cuenta verificada con ese correo."
+              : resetMode
+                ? "Elige una contraseña nueva para recuperar el acceso a tu cuenta."
+                : verifyEmail
+                  ? "Estamos comprobando que el enlace sea válido y no se haya usado."
+                  : "Inicia sesión con el correo que verificaste."}
         </p>
-        <form className="mt-7 grid gap-4" onSubmit={(event) => event.preventDefault()}>
-          <label>
-            <span className="label">Correo electrónico</span>
-            <input
-              className="input"
-              type="email"
-              autoComplete="email"
-              placeholder="nombre@correo.com"
-              required
-            />
-          </label>
-          <label>
-            <span className="label">Contraseña</span>
-            <input
-              className="input"
-              type="password"
-              autoComplete={signup ? "new-password" : "current-password"}
-              placeholder="Tu contraseña"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {signup && (
-            <div aria-live="polite" className="-mt-2">
-              <div
-                className="h-2 overflow-hidden rounded-full bg-[#e7e7e0]"
-                role="progressbar"
-                aria-label="Seguridad de la contraseña"
-                aria-valuemin={0}
-                aria-valuemax={passwordRequirements.length}
-                aria-valuenow={metRequirements}
-              >
-                <div
-                  className={`h-full rounded-full transition-[width,background-color] duration-300 ${progressColor}`}
-                  style={{
-                    width: `${(metRequirements / passwordRequirements.length) * 100}%`,
-                  }}
+
+        {verifyEmail ? (
+          <div className="mt-7">
+            {flowState === "verifying" ? (
+              <p className="text-sm text-muted" role="status">
+                Verificando el enlace...
+              </p>
+            ) : flowState === "verified" ? (
+              <>
+                <p className="text-sm text-[#2f855a]" role="status">
+                  Correo verificado. Ya puedes continuar a la tienda.
+                </p>
+                <button className="btn-primary mt-5" onClick={onAuthenticated}>
+                  Continuar <span aria-hidden="true">→</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-[#9d5144]" role="alert">
+                  {errorMessage}
+                </p>
+                <a
+                  className="mt-5 inline-block text-sm font-semibold text-leaf underline"
+                  href="#iniciar-sesion"
+                >
+                  Volver a iniciar sesión
+                </a>
+              </>
+            )}
+          </div>
+        ) : flowState === "verification-sent" ? (
+          <div className="mt-7">
+            <p className="text-sm leading-6 text-muted" role="status">
+              Enviamos un enlace de verificación a <strong>{email}</strong>. Ábrelo antes de iniciar
+              sesión; el enlace vence en 24 horas.
+            </p>
+            <button className="btn-secondary mt-5" onClick={resendVerification} disabled={busy}>
+              {busy ? "Enviando..." : "Reenviar correo"}
+            </button>
+          </div>
+        ) : flowState === "reset-requested" ? (
+          <div className="mt-7">
+            <p className="text-sm leading-6 text-muted" role="status">
+              Si existe una cuenta verificada con ese correo, enviaremos las instrucciones. Revisa
+              también la carpeta de correo no deseado.
+            </p>
+            <a
+              className="mt-5 inline-block text-sm font-semibold text-leaf underline"
+              href="#iniciar-sesion"
+            >
+              Volver a iniciar sesión
+            </a>
+          </div>
+        ) : flowState === "reset-complete" ? (
+          <div className="mt-7">
+            <p className="text-sm text-[#2f855a]" role="status">
+              Contraseña actualizada. Inicia sesión con la nueva contraseña.
+            </p>
+            <a className="btn-primary mt-5" href="#iniciar-sesion">
+              Ir a iniciar sesión
+            </a>
+          </div>
+        ) : (
+          <form className="mt-7 grid gap-4" onSubmit={submit}>
+            {signup && (
+              <>
+                <label>
+                  <span className="label">Nombre completo</span>
+                  <input
+                    className="input"
+                    type="text"
+                    autoComplete="name"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    maxLength={120}
+                    required
+                  />
+                </label>
+                <label>
+                  <span className="label">Teléfono</span>
+                  <input
+                    className="input"
+                    type="tel"
+                    autoComplete="tel"
+                    value={phone}
+                    onChange={(event) => setPhone(event.target.value)}
+                    maxLength={40}
+                    required
+                  />
+                </label>
+              </>
+            )}
+            {!resetMode && (
+              <label>
+                <span className="label">Correo electrónico</span>
+                <input
+                  className="input"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="nombre@correo.com"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  maxLength={254}
+                  required
                 />
-              </div>
-              <ul className="mt-3 grid gap-1.5 text-xs">
-                {passwordRequirements.map((requirement) => (
-                  <li
-                    key={requirement.label}
-                    className={`flex items-center gap-2 ${
-                      requirement.met ? "text-[#2f855a]" : "text-[#c53030]"
-                    }`}
+              </label>
+            )}
+            {(!recovery || resetMode) && (
+              <label>
+                <span className="label">Contraseña</span>
+                <input
+                  className="input"
+                  type="password"
+                  autoComplete={signup || resetMode ? "new-password" : "current-password"}
+                  placeholder={resetMode ? "Nueva contraseña" : "Tu contraseña"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                  required
+                />
+              </label>
+            )}
+            {(signup || resetMode) && (
+              <>
+                <div aria-live="polite" className="-mt-2">
+                  <div
+                    className="h-2 overflow-hidden rounded-full bg-[#e7e7e0]"
+                    role="progressbar"
+                    aria-label="Seguridad de la contraseña"
+                    aria-valuemin={0}
+                    aria-valuemax={passwordRequirements.length}
+                    aria-valuenow={metRequirements}
                   >
-                    <span aria-hidden="true" className="w-4 text-center font-bold">
-                      {requirement.met ? "✓" : "×"}
-                    </span>
-                    {requirement.label}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {signup && (
-            <label>
-              <span className="label">Confirmar contraseña</span>
-              <input className="input" type="password" autoComplete="new-password" required />
-            </label>
-          )}
-          <button className="btn-primary mt-2 w-full" type="submit" disabled>
-            {signup ? "Crear cuenta" : "Iniciar sesión"} <span aria-hidden="true">→</span>
-          </button>
-        </form>
-        <p className="mt-5 text-sm text-muted">
-          {signup ? "¿Ya tienes una cuenta?" : "¿No tienes una cuenta?"}{" "}
-          <a
-            className="font-semibold text-leaf underline underline-offset-4"
-            href={`#${signup ? "iniciar-sesion" : "crear-cuenta"}`}
-          >
-            {signup ? "Iniciar sesión" : "Crear cuenta"}
-          </a>
-        </p>
+                    <div
+                      className={`h-full rounded-full transition-[width,background-color] duration-300 ${progressColor}`}
+                      style={{
+                        width: `${(metRequirements / passwordRequirements.length) * 100}%`,
+                      }}
+                    />
+                  </div>
+                  <ul className="mt-3 grid gap-1.5 text-xs">
+                    {passwordRequirements.map((requirement) => (
+                      <li
+                        key={requirement.label}
+                        className={`flex items-center gap-2 ${
+                          requirement.met ? "text-[#2f855a]" : "text-[#c53030]"
+                        }`}
+                      >
+                        <span aria-hidden="true" className="w-4 text-center font-bold">
+                          {requirement.met ? "✓" : "×"}
+                        </span>
+                        {requirement.label}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <label>
+                  <span className="label">Confirmar contraseña</span>
+                  <input
+                    className="input"
+                    type="password"
+                    autoComplete="new-password"
+                    value={passwordConfirmation}
+                    onChange={(event) => setPasswordConfirmation(event.target.value)}
+                    required
+                  />
+                </label>
+              </>
+            )}
+            {errorMessage && (
+              <p className="text-sm text-[#9d5144]" role="alert">
+                {errorMessage}
+              </p>
+            )}
+            {showResend && (
+              <button
+                className="text-left text-sm font-semibold text-leaf underline"
+                type="button"
+                onClick={resendVerification}
+                disabled={busy}
+              >
+                Reenviar enlace de verificación
+              </button>
+            )}
+            <button
+              className="btn-primary mt-2 w-full"
+              type="submit"
+              disabled={
+                busy ||
+                ((signup || resetMode) &&
+                  (metRequirements !== passwordRequirements.length ||
+                    password !== passwordConfirmation))
+              }
+            >
+              {busy ? "Procesando..." : submitLabel} <span aria-hidden="true">→</span>
+            </button>
+          </form>
+        )}
+
+        {flowState === "idle" && !verifyEmail && !resetMode && (
+          <div className="mt-5 flex flex-wrap justify-between gap-3 text-sm">
+            <a
+              className="font-semibold text-leaf underline underline-offset-4"
+              href={`#${signup ? "iniciar-sesion" : "crear-cuenta"}`}
+            >
+              {signup ? "Iniciar sesión" : "Crear cuenta"}
+            </a>
+            {!signup && !recovery && (
+              <a
+                className="font-semibold text-leaf underline underline-offset-4"
+                href="#recuperar-contrasena"
+              >
+                ¿Olvidaste tu contraseña?
+              </a>
+            )}
+            {recovery && (
+              <a
+                className="font-semibold text-leaf underline underline-offset-4"
+                href="#iniciar-sesion"
+              >
+                Volver a iniciar sesión
+              </a>
+            )}
+          </div>
+        )}
         <p className="mt-6 rounded bg-[#f5f4ed] p-3 text-xs leading-5 text-muted">
-          Las compras requieren una cuenta y una sesión verificada. La conexión segura con
-          autenticación debe configurarse antes de habilitar esta acción.
+          Los enlaces de verificación vencen en 24 horas y los de recuperación en 1 hora. La tienda
+          no procesa pagos ni guarda datos de tarjeta.
         </p>
       </section>
     </main>
@@ -481,7 +746,10 @@ export function Storefront() {
   const [isScrolled, setIsScrolled] = useState(() => window.scrollY > 40);
   const [route, setRoute] = useState(window.location.hash.replace("#", ""));
   const { notify, region } = useNotice();
-  const accountMode = ["iniciar-sesion", "crear-cuenta"].includes(route);
+  const accountMode =
+    ["iniciar-sesion", "crear-cuenta", "recuperar-contrasena"].includes(route) ||
+    route.startsWith("verificar-correo/") ||
+    route.startsWith("restablecer-contrasena/");
   const productRouteId = route.startsWith("producto/")
     ? route.slice("producto/".length).split("/")[0]
     : "";
@@ -489,7 +757,9 @@ export function Storefront() {
     (product) => encodeURIComponent(product.id) === productRouteId
   );
   const isProduct = Boolean(selectedProduct);
-  const isCategory = catalog.categories.includes(decodeURIComponent(route));
+  const isCategory = catalog.categories.some(
+    (category) => category.name === decodeURIComponent(route)
+  );
 
   // Reduce el header fijo al desplazarse para dejar más espacio al contenido.
   useEffect(() => {
@@ -670,20 +940,22 @@ export function Storefront() {
               inert={isScrolled}
             >
               <div className="mx-auto flex max-w-7xl gap-2 overflow-x-auto px-4 pb-3 sm:px-7">
-                {["Todos", ...catalog.categories].map((category) => (
-                  <button
-                    key={category}
-                    onClick={() => {
-                      setActiveCategory(category);
-                      window.location.hash =
-                        category === "Todos" ? "todos-productos" : encodeURIComponent(category);
-                      if (category !== "Todos") window.scrollTo({ top: 0, behavior: "smooth" });
-                    }}
-                    className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-semibold transition ${(isCategory && decodeURIComponent(route) === category) || (!isCategory && activeCategory === category) ? "bg-leaf text-white" : "text-muted hover:bg-white"}`}
-                  >
-                    {category}
-                  </button>
-                ))}
+                {["Todos", ...catalog.categories.map((category) => category.name)].map(
+                  (category) => (
+                    <button
+                      key={category}
+                      onClick={() => {
+                        setActiveCategory(category);
+                        window.location.hash =
+                          category === "Todos" ? "todos-productos" : encodeURIComponent(category);
+                        if (category !== "Todos") window.scrollTo({ top: 0, behavior: "smooth" });
+                      }}
+                      className={`whitespace-nowrap rounded-full px-4 py-2 text-xs font-semibold transition ${(isCategory && decodeURIComponent(route) === category) || (!isCategory && activeCategory === category) ? "bg-leaf text-white" : "text-muted hover:bg-white"}`}
+                    >
+                      {category}
+                    </button>
+                  )
+                )}
                 <a
                   className="ml-auto hidden whitespace-nowrap px-2 py-2 text-xs font-semibold text-muted hover:text-leaf lg:block"
                   href="?page=admin"
@@ -817,16 +1089,31 @@ export function Storefront() {
                       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
                         {catalog.categories.map((category, index) => (
                           <a
-                            key={category}
-                            href={`#${encodeURIComponent(category)}`}
-                            onClick={() => setActiveCategory(category)}
+                            key={category.name}
+                            href={`#${encodeURIComponent(category.name)}`}
+                            onClick={() => setActiveCategory(category.name)}
                             className={`group relative flex min-h-48 flex-col justify-between overflow-hidden rounded-lg p-6 ${categoryArt[index % categoryArt.length]} transition hover:-translate-y-1`}
                           >
-                            <span className="text-xs font-bold uppercase tracking-[.15em] text-leaf">
+                            {category.image && (
+                              <img
+                                src={category.image}
+                                alt=""
+                                className="absolute inset-0 h-full w-full object-cover opacity-25 transition group-hover:scale-105"
+                              />
+                            )}
+                            <span className="absolute inset-0 bg-gradient-to-t from-white/80 via-white/20 to-transparent" />
+                            <span className="relative z-10 text-xs font-bold uppercase tracking-[.15em] text-leaf">
                               0{index + 1}
                             </span>
-                            <span className="font-display text-2xl">{category}</span>
-                            <span className="absolute right-5 top-5 text-4xl text-leaf/25 transition group-hover:translate-x-1">
+                            <span className="relative">
+                              <span className="block font-display text-2xl">{category.name}</span>
+                              {category.description && (
+                                <span className="mt-1 block max-w-xs text-xs text-ink/70">
+                                  {category.description}
+                                </span>
+                              )}
+                            </span>
+                            <span className="absolute right-5 top-5 z-10 text-4xl text-leaf/25 transition group-hover:translate-x-1">
                               ↗
                             </span>
                           </a>
@@ -854,22 +1141,24 @@ export function Storefront() {
                     />
                     <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
                       <div className="flex gap-2 overflow-x-auto">
-                        {["Todos", ...catalog.categories].map((category) => (
-                          <button
-                            key={category}
-                            onClick={() => {
-                              setActiveCategory(category);
-                              if (isCategory)
-                                window.location.hash =
-                                  category === "Todos"
-                                    ? "todos-productos"
-                                    : encodeURIComponent(category);
-                            }}
-                            className={`whitespace-nowrap rounded-full border px-4 py-2 text-xs ${(isCategory ? decodeURIComponent(route) : activeCategory) === category ? "border-leaf bg-leaf text-white" : "border-line hover:bg-paper"}`}
-                          >
-                            {category}
-                          </button>
-                        ))}
+                        {["Todos", ...catalog.categories.map((category) => category.name)].map(
+                          (category) => (
+                            <button
+                              key={category}
+                              onClick={() => {
+                                setActiveCategory(category);
+                                if (isCategory)
+                                  window.location.hash =
+                                    category === "Todos"
+                                      ? "todos-productos"
+                                      : encodeURIComponent(category);
+                              }}
+                              className={`whitespace-nowrap rounded-full border px-4 py-2 text-xs ${(isCategory ? decodeURIComponent(route) : activeCategory) === category ? "border-leaf bg-leaf text-white" : "border-line hover:bg-paper"}`}
+                            >
+                              {category}
+                            </button>
+                          )
+                        )}
                       </div>
                       <span className="text-xs text-muted">
                         {filteredProducts.length} productos

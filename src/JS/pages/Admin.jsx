@@ -2,20 +2,31 @@ import React, { useCallback, useEffect, useState } from "react";
 import {
   CATALOG_CHANGE_KEY,
   DATA_KEY,
+  ADMIN_DATA_CHANGE_KEY,
   isValidImage,
   saveCatalog,
 } from "../services/catalogStorage.js";
 import { readAdminData } from "../services/adminStorage.js";
 import {
+  createAdminCustomer,
   createAdminCategory,
   createAdminProduct,
+  createAdminSale,
+  cancelAdminOrder,
+  confirmAdminOrder,
+  deleteAdminCustomer,
   deleteAdminCategory,
   deleteAdminProduct,
   loginAdmin,
+  readAdminCustomers,
+  readAdminOrders,
+  readAdminSales,
   logoutAdmin,
   readAdminSession,
+  updateAdminCustomer,
   updateAdminCategory,
   updateAdminProduct,
+  voidAdminSale,
 } from "../services/adminApi.js";
 import { fetchPublicCatalog } from "../services/catalogApi.js";
 import { makeId, money } from "../shared/format.js";
@@ -34,13 +45,14 @@ const NAVIGATION = [
   ["inventory", "▤", "Inventario"],
   ["categories", "▧", "Categorías"],
   ["customers", "♙", "Clientes"],
+  ["orders", "▣", "Pedidos"],
   ["sales", "↗", "Ventas"],
   ["admins", "♧", "Administradores"],
 ];
 
 /**
  * Campos editoriales del producto y previsualización en vivo de la ficha pública.
- * @param {{record: import("../models.js").Product|null, categories: string[], products: import("../models.js").Product[]}} props
+ * @param {{record: import("../models.js").Product|null, categories: import("../models.js").Category[], products: import("../models.js").Product[]}} props
  */
 function ProductFields({ record, categories, products }) {
   const initialDetails = getProductDetails(
@@ -48,7 +60,7 @@ function ProductFields({ record, categories, products }) {
       id: "",
       name: "",
       sku: "",
-      category: categories[0] || "",
+      category: categories[0]?.name || "",
       detail: "",
       price: 1,
       stock: 0,
@@ -56,7 +68,7 @@ function ProductFields({ record, categories, products }) {
   );
   const recommendationSource = record || {
     id: "product-preview",
-    category: categories[0] || "",
+    category: categories[0]?.name || "",
   };
   const initialRecommendations =
     initialDetails.recommendedProductIds ||
@@ -66,7 +78,7 @@ function ProductFields({ record, categories, products }) {
   const [draft, setDraft] = useState(() => ({
     name: record?.name || "",
     sku: record?.sku || "",
-    category: record?.category || categories[0] || "",
+    category: record?.category || categories[0]?.name || "",
     detail: record?.detail || "",
     price: String(record?.price ?? ""),
     stock: String(record?.stock ?? 0),
@@ -132,7 +144,7 @@ function ProductFields({ record, categories, products }) {
         <span className="label">Categoría</span>
         <select className="input" name="category" value={draft.category} onChange={update} required>
           {categories.map((category) => (
-            <option key={category}>{category}</option>
+            <option key={category.name}>{category.name}</option>
           ))}
         </select>
       </label>
@@ -403,7 +415,7 @@ function ProductFields({ record, categories, products }) {
 
 /**
  * Diálogo reutilizable que construye y valida formularios de entidades Admin.
- * @param {{form: import("../models.js").AdminFormState|null, close: () => void, save: (type: import("../models.js").AdminFormType, record: import("../models.js").Product|import("../models.js").Customer|import("../models.js").AdminUser|string|null, values: Record<string, FormDataEntryValue>) => Promise<void>, data: import("../models.js").AdminData}} props
+ * @param {{form: import("../models.js").AdminFormState|null, close: () => void, save: (type: import("../models.js").AdminFormType, record: import("../models.js").Product|import("../models.js").Category|import("../models.js").Customer|import("../models.js").AdminUser|null, values: Record<string, FormDataEntryValue>) => Promise<void>, data: import("../models.js").AdminData}} props
  */
 function AdminModal({ form, close, save, data }) {
   const [error, setError] = useState("");
@@ -460,13 +472,50 @@ function AdminModal({ form, close, save, data }) {
     );
   else if (type === "category")
     fields = (
-      <Field
-        label="Nombre de categoría"
-        name="name"
-        defaultValue={record || ""}
-        required
-        maxLength={60}
-      />
+      <>
+        <Field
+          label="Nombre de categoría"
+          name="name"
+          defaultValue={record?.name || ""}
+          required
+          maxLength={60}
+        />
+        <Field
+          label="Orden en la tienda"
+          name="sortOrder"
+          type="number"
+          min="1"
+          step="1"
+          defaultValue={record?.sortOrder ?? data.categories.length + 1}
+          required
+        />
+        <Field
+          label="URL de imagen"
+          name="image"
+          type="url"
+          defaultValue={record?.image?.startsWith("http") ? record.image : ""}
+          maxLength={3 * 1024 * 1024}
+        />
+        <label>
+          <span className="label">Subir imagen (máximo 2 MB)</span>
+          <input
+            className="input file:mr-4 file:rounded-full file:border-0 file:bg-[#eef0e6] file:px-4 file:py-2"
+            name="imageFile"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+          />
+        </label>
+        <label className="sm:col-span-2">
+          <span className="label">Descripción</span>
+          <textarea
+            className="input min-h-20"
+            name="description"
+            defaultValue={record?.description || ""}
+            maxLength={600}
+            rows={3}
+          />
+        </label>
+      </>
     );
   else if (type === "stock")
     fields = (
@@ -658,6 +707,7 @@ function AdminLogin({ onLogin, notice }) {
 export function Admin() {
   // Datos de dominio y estado efímero de las vistas, diálogo y carrito POS.
   const [data, setData] = useState(readAdminData);
+  const [orders, setOrders] = useState([]);
   const [active, setActive] = useState("dashboard");
   const [authenticated, setAuthenticated] = useState(false);
   const [authReady, setAuthReady] = useState(false);
@@ -667,6 +717,7 @@ export function Admin() {
   const [posCart, setPosCart] = useState([]);
   const [posCustomer, setPosCustomer] = useState("");
   const [posPayment, setPosPayment] = useState(PAYMENT_METHODS[0]);
+  const [saleBusy, setSaleBusy] = useState(false);
   const { notify, region } = useNotice();
 
   // Restaura la sesión solo si el servidor valida la cookie protegida.
@@ -677,9 +728,15 @@ export function Admin() {
         const isAuthenticated = await readAdminSession();
         if (!active) return;
         if (isAuthenticated) {
-          const catalog = await fetchPublicCatalog();
+          const [catalog, customers, sales, orders] = await Promise.all([
+            fetchPublicCatalog(),
+            readAdminCustomers(),
+            readAdminSales(),
+            readAdminOrders(),
+          ]);
           if (!active) return;
-          setData((current) => ({ ...current, ...catalog }));
+          setData((current) => ({ ...current, ...catalog, customers, sales }));
+          setOrders(orders);
           setAuthenticated(true);
         }
       } catch (error) {
@@ -702,6 +759,17 @@ export function Admin() {
         .then((catalog) => setData((current) => ({ ...current, ...catalog })))
         .catch((error) =>
           console.error("No se pudo actualizar el catálogo desde el servidor.", error)
+        );
+      return;
+    }
+    if (event.key === ADMIN_DATA_CHANGE_KEY) {
+      Promise.all([readAdminCustomers(), readAdminSales(), readAdminOrders()])
+        .then(([customers, sales, orders]) => {
+          setData((current) => ({ ...current, customers, sales }));
+          setOrders(orders);
+        })
+        .catch((error) =>
+          console.error("No se pudieron actualizar clientes y ventas desde el servidor.", error)
         );
       return;
     }
@@ -729,7 +797,13 @@ export function Admin() {
     try {
       const catalog = await fetchPublicCatalog();
       await loginAdmin(email, password);
-      setData((current) => ({ ...current, ...catalog }));
+      const [customers, sales, orders] = await Promise.all([
+        readAdminCustomers(),
+        readAdminSales(),
+        readAdminOrders(),
+      ]);
+      setData((current) => ({ ...current, ...catalog, customers, sales }));
+      setOrders(orders);
       setAuthNotice("");
       setAuthenticated(true);
       return "";
@@ -760,7 +834,7 @@ export function Admin() {
         !sku ||
         !Number.isFinite(price) ||
         price <= 0 ||
-        !Number.isInteger(stock) ||
+        !Number.isSafeInteger(stock) ||
         stock < 0
       )
         throw new Error(
@@ -873,38 +947,51 @@ export function Admin() {
       if (
         data.categories.some(
           (item) =>
-            item.toLocaleLowerCase("es-MX") === name.toLocaleLowerCase("es-MX") && item !== record
+            item.name.toLocaleLowerCase("es-MX") === name.toLocaleLowerCase("es-MX") &&
+            item.name !== record?.name
         )
       )
         throw new Error("Ya existe una categoría con ese nombre.");
-
-      if (record) {
-        const renamedCategory = await updateAdminCategory(record, name);
-        next.categories = data.categories.map((item) => (item === record ? renamedCategory : item));
+      const sortOrder = Number(values.sortOrder);
+      if (!Number.isSafeInteger(sortOrder) || sortOrder < 1)
+        throw new Error("El orden debe ser un entero igual o mayor que uno.");
+      const image = values.image?.trim() || record?.image || "";
+      if (image && !isValidImage(image))
+        throw new Error("Escribe una URL HTTPS válida o selecciona una imagen permitida.");
+      const category = {
+        name,
+        sortOrder,
+        image,
+        description: values.description.trim(),
+      };
+      const savedCategory = record
+        ? await updateAdminCategory(record.name, category)
+        : await createAdminCategory(category);
+      next.categories = data.categories
+        .map((item) => (item.name === record?.name ? savedCategory : item))
+        .concat(record ? [] : [savedCategory])
+        .sort((left, right) => left.sortOrder - right.sortOrder);
+      if (record && record.name !== savedCategory.name) {
         next.products = data.products.map((item) =>
-          item.category === record ? { ...item, category: renamedCategory } : item
+          item.category === record.name ? { ...item, category: savedCategory.name } : item
         );
-        setData({ ...data, ...next });
-        notify("Categoría renombrada y actualizada en el catálogo.");
-        return;
       }
-
-      const createdCategory = await createAdminCategory(name);
-      next.categories = [...data.categories, createdCategory];
       setData({ ...data, ...next });
-      notify("Categoría creada y visible en la tienda.");
+      notify(
+        record
+          ? "Categoría actualizada y visible en la tienda."
+          : "Categoría creada y visible en la tienda."
+      );
       return;
     } else if (type === "stock") {
       const stock = Number(values.stock);
-      if (!Number.isInteger(stock) || stock < 0)
+      if (!Number.isSafeInteger(stock) || stock < 0)
         throw new Error("El stock debe ser un entero no negativo.");
       next.products = data.products.map((item) =>
         item.id === record.id ? { ...item, stock } : item
       );
     } else if (type === "customer") {
       const customer = {
-        ...record,
-        id: record?.id || makeId("customer"),
         name: values.name.trim(),
         email: values.email.trim(),
         phone: values.phone.trim(),
@@ -919,9 +1006,15 @@ export function Admin() {
         )
       )
         throw new Error("Ese correo ya está registrado.");
-      next.customers = record
-        ? data.customers.map((item) => (item.id === record.id ? customer : item))
-        : [...data.customers, customer];
+      const savedCustomer = record
+        ? await updateAdminCustomer(record.id, customer)
+        : await createAdminCustomer(customer);
+      const customers = record
+        ? data.customers.map((item) => (item.id === savedCustomer.id ? savedCustomer : item))
+        : [...data.customers, savedCustomer];
+      setData({ ...data, customers });
+      notify(record ? "Cliente actualizado en el backend." : "Cliente guardado en el backend.");
+      return;
     } else if (type === "admin") {
       const admin = {
         ...record,
@@ -988,6 +1081,17 @@ export function Admin() {
       notify("No se puede eliminar un producto asociado a una venta vigente.", "error");
       return;
     }
+    if (
+      collection === "products" &&
+      orders.some(
+        (order) =>
+          ["pending", "confirmed"].includes(order.status) &&
+          order.items.some((item) => item.productId === id)
+      )
+    ) {
+      notify("No se puede eliminar un producto asociado a un pedido vigente.", "error");
+      return;
+    }
     if (collection === "products" && posCart.some((item) => item.id === id)) {
       notify("Quita el producto del punto de venta antes de eliminarlo.", "error");
       return;
@@ -1018,6 +1122,25 @@ export function Admin() {
       }
       setData(next);
       notify(`${label} eliminado.`);
+      return;
+    }
+    if (collection === "customers") {
+      try {
+        await deleteAdminCustomer(id);
+        setData((current) => ({
+          ...current,
+          customers: current.customers.filter((customer) => customer.id !== id),
+          sales: current.sales.map((sale) =>
+            sale.customerId === id ? { ...sale, customerId: null } : sale
+          ),
+        }));
+        setOrders((current) =>
+          current.map((order) => (order.customerId === id ? { ...order, customerId: null } : order))
+        );
+        notify(`${label} eliminado.`);
+      } catch (error) {
+        notify(error instanceof Error ? error.message : "No se pudo eliminar el cliente.", "error");
+      }
       return;
     }
     if (persist(next)) notify(`${label} eliminado.`);
@@ -1055,9 +1178,9 @@ export function Admin() {
     setPosCart(next.filter((item) => item.quantity > 0));
   };
 
-  // Verifica existencias, crea la instantánea de venta y descuenta inventario.
-  const completeSale = () => {
-    if (!posCart.length) return;
+  // El backend verifica stock, captura precios y registra la venta atómicamente.
+  const completeSale = async () => {
+    if (!posCart.length || saleBusy) return;
     if (
       posCart.some(
         (line) =>
@@ -1067,46 +1190,29 @@ export function Admin() {
       notify("El inventario cambió; revisa las cantidades.", "error");
       return;
     }
-    const customer = data.customers.find((item) => item.id === posCustomer);
-    const items = posCart.map((line) => {
-      const product = data.products.find((item) => item.id === line.id);
-      return {
-        productId: product.id,
-        name: product.name,
-        sku: product.sku,
-        unitPrice: product.price,
-        quantity: line.quantity,
-      };
-    });
-    const total = items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
-    const next = {
-      ...data,
-      products: data.products.map((product) => {
-        const line = posCart.find((item) => item.id === product.id);
-        return line ? { ...product, stock: product.stock - line.quantity } : product;
-      }),
-      sales: [
-        ...data.sales,
-        {
-          id: makeId("sale"),
-          date: new Date().toISOString(),
-          customerId: customer?.id || null,
-          customerName: customer?.name || "",
-          paymentMethod: posPayment,
-          items,
-          total,
-          status: "completed",
-        },
-      ],
-    };
-    if (persist(next)) {
+    setSaleBusy(true);
+    try {
+      const result = await createAdminSale({
+        customerId: posCustomer || null,
+        paymentMethod: posPayment,
+        items: posCart.map(({ id, quantity }) => ({ productId: id, quantity })),
+      });
+      setData((current) => ({
+        ...current,
+        products: result.products,
+        sales: [result.sale, ...current.sales],
+      }));
       setPosCart([]);
-      notify(`Venta confirmada por ${money(total)}. El stock fue actualizado.`);
+      notify(`Venta confirmada por ${money(result.sale.total)}. El stock fue actualizado.`);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo registrar la venta.", "error");
+    } finally {
+      setSaleBusy(false);
     }
   };
 
-  // Anula una venta y devuelve las unidades al inventario vigente.
-  const voidSale = (sale) => {
+  // El backend registra la anulación y devuelve al inventario las unidades.
+  const voidSale = async (sale) => {
     if (
       sale.status !== "completed" ||
       !window.confirm(
@@ -1114,19 +1220,46 @@ export function Admin() {
       )
     )
       return;
-    const next = {
-      ...data,
-      products: data.products.map((product) => {
-        const line = sale.items.find((item) => item.productId === product.id);
-        return line ? { ...product, stock: product.stock + line.quantity } : product;
-      }),
-      sales: data.sales.map((item) =>
-        item.id === sale.id
-          ? { ...item, status: "voided", voidedAt: new Date().toISOString() }
-          : item
-      ),
-    };
-    if (persist(next)) notify("Venta anulada; el inventario fue restaurado.");
+    try {
+      const result = await voidAdminSale(sale.id);
+      setData((current) => ({
+        ...current,
+        products: result.products,
+        sales: current.sales.map((item) => (item.id === sale.id ? result.sale : item)),
+      }));
+      notify("Venta anulada; el inventario fue restaurado.");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo anular la venta.", "error");
+    }
+  };
+
+  const updateOrder = async (order, action) => {
+    if (order.status !== "pending" && action === "confirm") return;
+    if (order.status === "cancelled") return;
+    const actionLabel = action === "confirm" ? "confirmar" : "cancelar";
+    if (!window.confirm(`¿Deseas ${actionLabel} el pedido ${order.id.slice(-8).toUpperCase()}?`)) {
+      return;
+    }
+    try {
+      const result =
+        action === "confirm" ? await confirmAdminOrder(order.id) : await cancelAdminOrder(order.id);
+      setData((current) => ({ ...current, products: result.products }));
+      setOrders((current) =>
+        current.map((item) => (item.id === result.order.id ? result.order : item))
+      );
+      notify(
+        action === "confirm"
+          ? "Pedido confirmado y existencias descontadas."
+          : order.status === "confirmed"
+            ? "Pedido cancelado y existencias restauradas."
+            : "Pedido cancelado."
+      );
+    } catch (error) {
+      notify(
+        error instanceof Error ? error.message : `No se pudo ${actionLabel} el pedido.`,
+        "error"
+      );
+    }
   };
 
   if (!authReady)
@@ -1397,28 +1530,45 @@ export function Admin() {
           </button>
         )}
         {table(
-          ["Categoría", "Productos", "Acciones"],
-          visible(data.categories.map((name) => ({ name }))).map(({ name }) => (
-            <tr key={name}>
-              <td className="font-semibold">{name}</td>
-              <td>{data.products.filter((product) => product.category === name).length}</td>
+          ["Categoría", "Orden", "Productos", "Acciones"],
+          visible(data.categories).map((category) => (
+            <tr key={category.name}>
+              <td>
+                <div className="flex items-center gap-3">
+                  {category.image && (
+                    <img className="h-11 w-11 rounded object-cover" src={category.image} alt="" />
+                  )}
+                  <div>
+                    <strong>{category.name}</strong>
+                    {category.description && (
+                      <p className="mt-1 max-w-sm text-xs text-muted">{category.description}</p>
+                    )}
+                  </div>
+                </div>
+              </td>
+              <td>{category.sortOrder}</td>
+              <td>
+                {data.products.filter((product) => product.category === category.name).length}
+              </td>
               <td>
                 {actions(
-                  () => openForm("category", name),
+                  () => openForm("category", category),
                   async () => {
-                    if (data.products.some((product) => product.category === name)) {
+                    if (data.products.some((product) => product.category === category.name)) {
                       notify(
                         "No se puede eliminar una categoría que tiene productos asignados.",
                         "error"
                       );
                       return;
                     }
-                    if (!window.confirm(`¿Eliminar la categoría "${name}"?`)) return;
+                    if (!window.confirm(`¿Eliminar la categoría "${category.name}"?`)) return;
                     try {
-                      await deleteAdminCategory(name);
+                      await deleteAdminCategory(category.name);
                       setData((current) => ({
                         ...current,
-                        categories: current.categories.filter((item) => item !== name),
+                        categories: current.categories.filter(
+                          (item) => item.name !== category.name
+                        ),
                       }));
                       notify("Categoría eliminada del catálogo.");
                     } catch (error) {
@@ -1466,6 +1616,71 @@ export function Admin() {
             </tr>
           )),
           "Aún no hay clientes."
+        )}
+      </>
+    );
+  } else if (active === "orders") {
+    content = (
+      <>
+        {cardHeading(
+          "Pedidos en línea",
+          "Los pedidos pendientes no reservan existencias. Confirma solo después de revisar que aún haya stock."
+        )}
+        {toolbar("Buscar por pedido, cliente o dirección")}
+        {table(
+          ["Pedido", "Fecha", "Cliente", "Entrega", "Artículos", "Total", "Estado", "Acciones"],
+          visible(orders).map((order) => (
+            <tr key={order.id}>
+              <td className="font-semibold">{order.id.slice(-8).toUpperCase()}</td>
+              <td>
+                {new Date(order.date).toLocaleString("es-MX", {
+                  dateStyle: "short",
+                  timeStyle: "short",
+                })}
+              </td>
+              <td>
+                {order.customerName}
+                <span className="block text-xs text-muted">{order.shippingAddress.phone}</span>
+              </td>
+              <td>
+                {order.shippingAddress.name}
+                <span className="block text-xs text-muted">
+                  {order.shippingAddress.street}, {order.shippingAddress.city},{" "}
+                  {order.shippingAddress.region} {order.shippingAddress.postalCode}
+                </span>
+              </td>
+              <td>{order.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
+              <td>{money(order.total)}</td>
+              <td>
+                {order.status === "pending"
+                  ? "Pendiente"
+                  : order.status === "confirmed"
+                    ? "Confirmado"
+                    : "Cancelado"}
+              </td>
+              <td>
+                <div className="flex gap-3 whitespace-nowrap">
+                  {order.status === "pending" && (
+                    <button
+                      className="text-xs font-semibold text-leaf underline"
+                      onClick={() => updateOrder(order, "confirm")}
+                    >
+                      Confirmar
+                    </button>
+                  )}
+                  {order.status !== "cancelled" && (
+                    <button
+                      className="text-xs font-semibold text-[#9d5144] underline"
+                      onClick={() => updateOrder(order, "cancel")}
+                    >
+                      Cancelar
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
+          )),
+          "Aún no hay pedidos en línea."
         )}
       </>
     );
@@ -1667,10 +1882,10 @@ export function Admin() {
             </div>
             <button
               className="btn-primary mt-4 w-full"
-              disabled={!posCart.length}
+              disabled={!posCart.length || saleBusy}
               onClick={completeSale}
             >
-              Confirmar venta
+              {saleBusy ? "Registrando venta…" : "Confirmar venta"}
             </button>
           </section>
         </div>
