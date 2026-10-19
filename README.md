@@ -1,41 +1,157 @@
-# Amway storefront
+# 🛍️ Amway Storefront
 
-## Desarrollo
+Tienda online con catálogo, checkout y panel de administración. La aplicación usa **React y Vite** en el frontend y **Node.js, Express y SQLite** en el backend.
 
-```sh
-npm install
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))" # copia el resultado
-# Reemplaza los valores de ejemplo y pega el secreto generado:
-ADMIN_EMAIL="tu-correo@ejemplo.com" \
-ADMIN_PASSWORD="una-frase-secreta-de-al-menos-12-caracteres" \
-ADMIN_SESSION_SECRET="pega-aqui-el-secreto-generado" \
-SMTP_HOST="smtp.tu-proveedor.com" \
-SMTP_PORT="587" \
-SMTP_USER="tu-usuario-smtp" \
-SMTP_PASSWORD="tu-clave-smtp" \
-SMTP_FROM="Amway <no-reply@tu-dominio.com>" \
-PUBLIC_BASE_URL="http://localhost:5173" npm run server
-# En otra terminal:
-npm run dev
+> [!IMPORTANT]
+> El checkout no procesa pagos ni solicita datos de tarjeta. No uses datos de pago reales con esta versión.
+
+## 📚 Contenido
+
+- [✨ Funcionalidades](#-funcionalidades)
+- [🧰 Requisitos](#-requisitos)
+- [🚀 Inicio rápido](#-inicio-rápido)
+- [⚙️ Configuración](#️-configuración)
+- [🧩 Cómo funciona](#-cómo-funciona)
+- [🗂️ Estructura del proyecto](#️-estructura-del-proyecto)
+- [✅ Pruebas y formato](#-pruebas-y-formato)
+- [📦 Compilación y producción](#-compilación-y-producción)
+
+## ✨ Funcionalidades
+
+- 🛒 Catálogo con productos, categorías y fichas de producto.
+- 👤 Cuentas de cliente, verificación por correo y recuperación de contraseña.
+- 📦 Checkout con pedidos persistidos en el backend.
+- 🧾 Panel Admin para gestionar productos, categorías, clientes, ventas y pedidos.
+- 💾 Persistencia SQLite para catálogo, cuentas, ventas y pedidos.
+- 📱 Vistas de tienda, checkout y administración dentro de una aplicación React.
+
+## 🧰 Requisitos
+
+- **Node.js 22.5 o posterior** (se usa el módulo SQLite integrado).
+- **npm**.
+- Un servidor SMTP para registro, verificación de correo y recuperación de contraseña.
+
+## 🚀 Inicio rápido
+
+1. Instala las dependencias:
+
+   ```sh
+   npm install
+   ```
+
+2. Genera un secreto aleatorio para las sesiones:
+
+   ```sh
+   node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+   ```
+
+3. En una terminal, configura las variables de entorno e inicia el backend:
+
+   ```sh
+   ADMIN_EMAIL="tu-correo@ejemplo.com" \
+   ADMIN_PASSWORD="una-frase-secreta-de-al-menos-12-caracteres" \
+   ADMIN_SESSION_SECRET="pega-aqui-el-secreto-generado" \
+   SMTP_HOST="smtp.tu-proveedor.com" \
+   SMTP_PORT="587" \
+   SMTP_USER="tu-usuario-smtp" \
+   SMTP_PASSWORD="tu-clave-smtp" \
+   SMTP_FROM="Amway <no-reply@tu-dominio.com>" \
+   PUBLIC_BASE_URL="http://localhost:5173" \
+   npm run server
+   ```
+
+4. En otra terminal, inicia el frontend:
+
+   ```sh
+   npm run dev
+   ```
+
+El backend escucha en `http://localhost:3000`; Vite sirve el frontend y reenvía las solicitudes `/api` al backend. `GET /api/health` permite comprobar la disponibilidad del servidor.
+
+## ⚙️ Configuración
+
+| Variable               | Descripción                                                                                                                           |
+| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ADMIN_EMAIL`          | Correo de la cuenta administradora.                                                                                                   |
+| `ADMIN_PASSWORD`       | Contraseña de Admin, con al menos 12 caracteres.                                                                                      |
+| `ADMIN_SESSION_SECRET` | Secreto aleatorio de 32 bytes o más para las sesiones de Admin.                                                                       |
+| `SMTP_HOST`            | Servidor SMTP para enviar correo.                                                                                                     |
+| `SMTP_PORT`            | Puerto SMTP.                                                                                                                          |
+| `SMTP_USER`            | Usuario SMTP.                                                                                                                         |
+| `SMTP_PASSWORD`        | Contraseña o credencial SMTP dedicada.                                                                                                |
+| `SMTP_FROM`            | Remitente de los correos, por ejemplo `Amway <no-reply@tu-dominio.com>`.                                                              |
+| `PUBLIC_BASE_URL`      | Dirección pública usada para generar enlaces; en desarrollo se permite HTTP solo para `localhost`, y en producción se requiere HTTPS. |
+
+> [!CAUTION]
+> Configura estas variables únicamente en el entorno del servidor. No incluyas contraseñas ni secretos en el código, en el navegador ni en el repositorio. Sin la configuración de Admin, el acceso y las escrituras administrativas quedan deshabilitados. Sin SMTP, el registro y las solicitudes de correo no están disponibles.
+
+### 🔐 Cuentas y sesiones
+
+Los clientes pueden registrarse desde la tienda y verificar su dirección de correo. Los enlaces de verificación vencen en 24 horas y solo pueden utilizarse una vez. La recuperación de contraseña usa enlaces que vencen en una hora; al cambiar la contraseña, se revocan las sesiones existentes.
+
+Las contraseñas se almacenan con hashes salados mediante scrypt. El registro, los intentos fallidos de inicio de sesión y las solicitudes de correo tienen límites por dirección IP. Las sesiones de Admin y de clientes usan cookies HttpOnly y se invalidan al reiniciar el servidor. La autenticación de Admin está pensada para un solo administrador.
+
+| Operación                                                      | Endpoint                                                                                  |
+| -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Iniciar sesión, consultar sesión y cerrar sesión de Admin      | `POST /api/admin/login`, `GET /api/admin/session`, `POST /api/admin/logout`               |
+| Registrar cuenta, verificar correo e iniciar sesión de cliente | `POST /api/account/register`, `POST /api/account/verify-email`, `POST /api/account/login` |
+| Consultar y cerrar sesión de cliente                           | `GET /api/account/session`, `POST /api/account/logout`                                    |
+| Reenviar verificación de correo                                | `POST /api/account/verification/resend`                                                   |
+| Solicitar y completar recuperación de contraseña               | `POST /api/account/password-reset/request`, `POST /api/account/password-reset/complete`   |
+
+Para probar las rutas de Admin, inicia sesión desde el portal; no copies la contraseña ni una clave dentro del código del navegador.
+
+## 🧩 Cómo funciona
+
+### 🏷️ Catálogo y administración
+
+La tienda lee productos y categorías del backend. Admin puede crear, editar y eliminar productos y categorías, y administrar clientes. Las categorías tienen `name`, `sortOrder`, `image` y `description`: el orden ascendente controla la navegación, y las tarjetas públicas muestran imagen y descripción cuando están configuradas. No se pueden eliminar categorías que tengan productos asignados.
+
+Las tarjetas del catálogo abren las fichas de producto mediante `#producto/<id>`. Las fichas incluyen disponibilidad, detalles, recomendaciones enlazadas y reseñas. Admin permite editar esta información y previsualizar la ficha pública. Los detalles y las reseñas precargadas son ilustrativos: confirma los datos oficiales y la autenticidad de las opiniones.
+
+### 🧾 Ventas y pedidos
+
+- **Ventas:** el servidor vuelve a comprobar las existencias y calcula el total con los precios actuales de SQLite. La venta, los precios y nombres históricos y el descuento de inventario se guardan en una transacción. Si falta stock o un producto, no se aplica ningún cambio parcial. Anular una venta restaura el inventario y conserva el registro como anulado.
+- **Pedidos:** Checkout requiere una sesión de cliente con correo verificado. Envía únicamente cantidades, identificadores de producto y dirección; el servidor calcula los precios y comprueba el stock. Crear un pedido no reserva ni descuenta existencias. Admin vuelve a comprobarlas y las descuenta al confirmar el pedido; si lo cancela después, las restaura. Los pedidos y sus líneas se guardan aparte de las ventas y conservan una instantánea de los productos.
+- **Historial:** las ventas conservan una instantánea de cada artículo y del nombre del cliente en el momento de la compra, incluso si después se edita o elimina ese cliente.
+
+### 💾 Persistencia y datos de demostración
+
+La primera ejecución crea `backend/data/store.sqlite` y carga datos de ejemplo si la tabla de productos está vacía. También añade automáticamente columnas nuevas a las tablas de categorías y credenciales de clientes de bases de datos anteriores.
+
+Los productos, las categorías y los datos privados de clientes, ventas y pedidos se almacenan en SQLite. El carrito y las secciones administrativas que aún son de demostración utilizan `localStorage`.
+
+## 🗂️ Estructura del proyecto
+
+```text
+├── backend/
+│   ├── adminAuth.js                  # Contraseña protegida y sesiones de Admin
+│   ├── app.js                        # Aplicación Express y rutas HTTP
+│   ├── catalogRepository.js          # Persistencia SQLite
+│   ├── customerAccountValidation.js  # Validación de registro y contraseña
+│   ├── customerAuth.js               # Hash de contraseñas y sesiones de cliente
+│   ├── customerValidation.js         # Validación de clientes
+│   ├── emailSender.js                # Envío de correo SMTP
+│   ├── orderValidation.js            # Validación de pedidos
+│   ├── productValidation.js          # Validación de productos y categorías
+│   ├── saleValidation.js             # Validación de solicitudes de venta
+│   └── server.js                     # Inicio del servidor Node.js
+├── src/
+│   ├── CSS/app.css                   # Tailwind y estilos compartidos
+│   ├── JS/
+│   │   ├── data/                     # Catálogo inicial y detalles de producto
+│   │   ├── pages/                    # Tienda, checkout y administración
+│   │   ├── services/                 # APIs y persistencia del frontend
+│   │   ├── shared/                   # Componentes React y formato de valores
+│   │   ├── main.jsx                  # Enrutamiento y montaje de React
+│   │   └── models.js                 # Contratos JSDoc de los datos
+│   └── index.html                    # Documento de entrada
+└── docs/                             # Salida generada para publicación estática
 ```
 
-El backend corre con Node.js + Express en `http://localhost:3000` y requiere Node.js 22.5 o posterior por el módulo SQLite integrado. `GET /api/health` comprueba si está disponible. La tienda lee productos y categorías con `GET /api/products` y `GET /api/categories`. Admin puede crear, editar y eliminar productos con `/api/products`, categorías con `/api/categories` y clientes con `/api/admin/customers`. Las lecturas de clientes, ventas y pedidos están en `GET /api/admin/customers`, `GET /api/admin/sales` y `GET /api/admin/orders`; las ventas se crean con `POST /api/admin/sales` y se anulan con `POST /api/admin/sales/:id/void`. Admin confirma o cancela pedidos con `POST /api/admin/orders/:id/confirm` y `POST /api/admin/orders/:id/cancel`. Las rutas de Admin requieren sesión. Configura el correo, una contraseña de al menos 12 caracteres y un secreto aleatorio de 32 bytes o más en el servidor; sin esa configuración, el acceso y las escrituras de Admin quedan deshabilitados. No guardes esos valores en el código ni los subas al repositorio.
+Los productos se relacionan con categorías por nombre; el carrito conserva `id` y `quantity`, y las ventas guardan instantáneas para proteger el historial frente a ediciones posteriores. No edites manualmente los archivos generados en `docs/`.
 
-El acceso Admin usa `POST /api/admin/login`, `GET /api/admin/session` y `POST /api/admin/logout`. Para probar las rutas, inicia sesión desde el portal Admin; no copies la contraseña ni una clave dentro del código del navegador.
-
-Los clientes pueden crear una cuenta desde la tienda (`POST /api/account/register`), verificar el correo (`POST /api/account/verify-email`), iniciar sesión (`POST /api/account/login`), consultar su sesión (`GET /api/account/session`) y cerrarla (`POST /api/account/logout`). Para reenviar la verificación se usa `POST /api/account/verification/resend`; sus enlaces vencen en 24 horas y solo pueden utilizarse una vez. La recuperación usa `POST /api/account/password-reset/request` y `POST /api/account/password-reset/complete`; los enlaces vencen en una hora y, al cambiar la contraseña, se revocan las sesiones existentes. Las contraseñas se guardan como hashes con sal mediante scrypt, separadas de los datos de contacto. El registro, los intentos fallidos de acceso y las solicitudes de correo tienen límites por dirección IP.
-
-El envío SMTP requiere `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` y `PUBLIC_BASE_URL`. Usa una contraseña de aplicación o credencial SMTP dedicada, guárdala solo en el entorno del servidor y no la escribas en el código ni en el navegador. Sin esos valores el registro y las solicitudes de correo quedan deshabilitados. En desarrollo se permite una URL HTTP solo para `localhost`; en producción se exige HTTPS.
-
-La primera vez, el backend crea `backend/data/store.sqlite` y carga los datos de ejemplo si la tabla de productos está vacía; también añade automáticamente columnas nuevas a las tablas de categorías y credenciales de clientes en bases de datos anteriores. Las siguientes ejecuciones leen ese archivo. Mientras se ejecuta Vite, las llamadas a `/api` se reenvían al backend. La tienda y Checkout leen productos, precios, existencias y categorías desde el backend. Admin administra productos, categorías, clientes, ventas y pedidos mediante rutas protegidas.
-
-Al confirmar una venta, el servidor vuelve a comprobar las existencias y calcula el total con los precios actuales de SQLite. La venta, sus precios/nombres históricos y el descuento de inventario se guardan en una transacción: si falta stock o un producto, no se aplica ningún cambio parcial. Anular una venta restaura el inventario y conserva el registro como anulado. El historial guarda una instantánea de cada artículo y el nombre del cliente del momento de compra, incluso si después se edita o elimina ese cliente.
-
-Checkout requiere una sesión de cliente cuyo correo esté verificado. Envía al servidor únicamente cantidades, identificadores de producto y dirección; el servidor calcula los precios y comprueba stock. Crear un pedido no reserva ni descuenta existencias. Admin vuelve a comprobarlas y las descuenta en una transacción al confirmar el pedido; si luego lo cancela, las restaura. Los pedidos y sus líneas se guardan aparte de las ventas del POS y conservan una instantánea de los productos. El Checkout no procesa pagos ni solicita datos de tarjeta.
-
-Las categorías tienen `name`, `sortOrder`, `image` y `description`. Admin permite editar esos datos; el orden ascendente controla la navegación y las tarjetas públicas muestran la imagen y descripción cuando están configuradas. Las categorías con productos asignados no se pueden eliminar. Los datos privados de clientes/ventas/pedidos y los productos/categorías ya no dependen de `localStorage`; el carrito y el resto de secciones administrativas de demostración siguen locales. El proxy de Vite solo funciona durante `npm run dev`; el sitio compilado necesita un backend desplegado bajo la misma dirección `/api`. Aún no se ha configurado ese alojamiento, así que no publiques la compilación estática hasta desplegar el backend. En producción la cookie requiere HTTPS. La autenticación de Admin está pensada para un solo administrador; las sesiones de Admin y clientes se invalidan al reiniciar el servidor.
-
-## Validación y formato
+## ✅ Pruebas y formato
 
 ```sh
 npm test
@@ -43,43 +159,17 @@ npm run format
 npm run format:check
 ```
 
-## Producción
+## 📦 Compilación y producción
+
+Genera la aplicación estática con:
 
 ```sh
 npm run build
 ```
 
-Vite genera una sola página estática en `docs/index.html` y los recursos compilados en `docs/assets/`. La tienda, el checkout y Admin son vistas React seleccionadas mediante `?page=checkout` y `?page=admin`. El código de las vistas está en `src/JS/pages/`, los componentes compartidos en `src/JS/shared/` y Tailwind CSS en `src/CSS/app.css`.
+Vite crea una página en `docs/index.html` y los recursos compilados en `docs/assets/`. La tienda, el checkout y Admin son vistas React seleccionadas mediante `?page=checkout` y `?page=admin`.
 
-Las tarjetas del catálogo abren la ficha del producto con `#producto/<id>`. Las fichas incluyen disponibilidad, detalles, recomendaciones enlazadas y una sección de reseñas. Desde Admin se editan la información completa, imagen, etiqueta, recomendaciones, calificación y reseñas, con una vista previa en vivo de la ficha pública. Los detalles y las reseñas precargadas son contenido ilustrativo de demostración; confirma siempre los datos oficiales del producto y la autenticidad de las opiniones.
+> [!WARNING]
+> El proxy de Vite solo funciona durante `npm run dev`. En producción, la aplicación compilada necesita un backend desplegado bajo la misma dirección `/api`; este alojamiento todavía no está configurado. No publiques la compilación estática hasta desplegar el backend y configurar HTTPS. La cookie de producción requiere HTTPS.
 
-## Estructura del código fuente
-
-```text
-├── backend/
-│   ├── adminAuth.js            # Contraseña protegida y sesiones firmadas
-│   ├── app.js                  # Aplicación Express y rutas HTTP
-│   ├── catalogRepository.js    # Persistencia SQLite de catálogo, cuentas, ventas y pedidos
-│   ├── customerAccountValidation.js # Validación de registro y contraseña
-│   ├── customerAuth.js         # Hash de contraseñas y sesiones de cliente
-│   ├── customerValidation.js   # Validación de clientes
-│   ├── emailSender.js          # Envío de correo SMTP
-│   ├── orderValidation.js      # Validación de pedidos
-│   ├── productValidation.js    # Validaciones de productos y categorías
-│   ├── saleValidation.js       # Validación de solicitudes de venta
-│   └── server.js               # Inicio local del servidor Node.js
-└── src/
-    ├── CSS/app.css             # Tailwind, tokens de diseño y estilos compartidos
-    ├── JS/
-    │   ├── data/               # Catálogo inicial y detalles de fichas
-    │   ├── models.js           # Contratos JSDoc de los datos persistidos
-    │   ├── pages/              # Tienda, checkout y administración
-    │   ├── services/           # APIs del catálogo, cuenta de cliente y Admin
-    │   ├── shared/             # Componentes React y formato de valores
-    │   └── main.jsx            # Enrutamiento por query y montaje React
-    └── index.html              # Documento de entrada único
-```
-
-Los contratos del modelo viven en `src/JS/models.js`: los productos se relacionan con categorías por nombre; las categorías tienen orden, imagen y descripción; el carrito mantiene `id` y `quantity`; y las ventas guardan una instantánea de nombre, SKU y precio para proteger el historial de ediciones posteriores. Los archivos de `docs/` son solo salida generada: no deben editarse manualmente.
-
-El carrito y las secciones administrativas que aún son de demostración usan `localStorage`; las sesiones de cliente y Admin usan cookies HttpOnly del backend. No se deben usar datos de pago reales con esta versión. Antes de abrir la tienda al público, configura SMTP con credenciales protegidas en el servidor, despliega HTTPS y configura un proveedor de pagos fuera de este Checkout.
+Antes de abrir la tienda al público, configura SMTP con credenciales protegidas en el servidor, despliega con HTTPS y configura un proveedor de pagos externo al checkout actual.
