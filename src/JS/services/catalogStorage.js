@@ -25,6 +25,95 @@ export function isValidImage(image) {
 }
 
 /**
+ * Comprueba que una reseña tenga autor, estrellas, fecha y comentario válidos.
+ * @param {unknown} review Registro de opinión leído desde el almacenamiento.
+ * @returns {boolean} Si la reseña cumple el contrato.
+ */
+function isValidReview(review) {
+  return (
+    review !== null &&
+    typeof review === "object" &&
+    typeof review.author === "string" &&
+    Boolean(review.author.trim()) &&
+    Number.isInteger(review.rating) &&
+    review.rating >= 1 &&
+    review.rating <= 5 &&
+    typeof review.date === "string" &&
+    typeof review.text === "string" &&
+    Boolean(review.text.trim())
+  );
+}
+
+/**
+ * Comprueba que las referencias opcionales de recomendaciones sean únicas.
+ * @param {unknown} ids Identificadores guardados en los detalles del producto.
+ * @returns {boolean} Si son como máximo cuatro IDs no vacíos y únicos.
+ */
+function isValidRecommendationIds(ids) {
+  return (
+    Array.isArray(ids) &&
+    ids.length <= 4 &&
+    ids.every((id) => typeof id === "string" && Boolean(id)) &&
+    new Set(ids).size === ids.length
+  );
+}
+
+/**
+ * Comprueba el contenido editable que se muestra en la ficha pública.
+ * @param {unknown} value Información detallada almacenada en un producto.
+ * @returns {boolean} Si los campos y reseñas cumplen el contrato.
+ */
+export function isValidProductDetails(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const {
+    description,
+    ingredients,
+    package: productPackage,
+    instructions,
+    benefits,
+    rating,
+    reviewCount,
+    reviews,
+    recommendedProductIds,
+  } = value;
+  const requiredText = [description, ingredients, productPackage, instructions];
+  const validContent = requiredText.every(
+    (item) => typeof item === "string" && Boolean(item.trim())
+  );
+  const validBenefits =
+    Array.isArray(benefits) &&
+    benefits.length > 0 &&
+    benefits.every((item) => typeof item === "string" && Boolean(item.trim()));
+  const validRating = Number.isFinite(rating) && rating >= 0 && rating <= 5;
+  const validReviewCount = Number.isInteger(reviewCount) && reviewCount >= 0;
+  const validReviews =
+    Array.isArray(reviews) && reviews.length <= reviewCount && reviews.every(isValidReview);
+  const validRecommendations =
+    recommendedProductIds === undefined || isValidRecommendationIds(recommendedProductIds);
+
+  return (
+    validContent &&
+    validBenefits &&
+    validRating &&
+    validReviewCount &&
+    validReviews &&
+    validRecommendations
+  );
+}
+
+/**
+ * Comprueba que IDs recomendados existan y no apunten al mismo producto.
+ * @param {import("../models.js").Product[]} products Catálogo completo.
+ * @returns {boolean} Si todas las relaciones de recomendación son válidas.
+ */
+function areRecommendationsValid(products) {
+  return products.every((product) => {
+    const ids = product.details?.recommendedProductIds || [];
+    return ids.every((id) => id !== product.id && products.some((item) => item.id === id));
+  });
+}
+
+/**
  * Valida el contrato del catálogo persistido antes de exponer sus registros.
  * @param {unknown} value Datos JSON sin validar.
  * @returns {boolean} True si categorías, productos e invariantes son válidos.
@@ -50,9 +139,12 @@ function isValidCatalog(value) {
       product.price > 0 &&
       Number.isInteger(product.stock) &&
       product.stock >= 0 &&
+      (product.badge === undefined || typeof product.badge === "string") &&
+      (product.details === undefined || isValidProductDetails(product.details)) &&
       (product.image === undefined || product.image === "" || isValidImage(product.image))
   );
   if (!validProducts) return false;
+  if (!areRecommendationsValid(products)) return false;
 
   const uniqueProductIds = new Set(products.map((product) => product.id)).size === products.length;
   const uniqueSkus =
@@ -85,7 +177,7 @@ export function readCatalog() {
         ...fallback,
         ...product,
         image: product.image || fallback?.image || "",
-        badge: product.badge || fallback?.badge || "Nuevo",
+        badge: product.badge ?? fallback?.badge ?? "Nuevo",
       };
     });
     return { products, categories: [...data.categories] };

@@ -16,6 +16,30 @@
  * @property {number} stock Cantidad entera disponible.
  * @property {string} [badge] Etiqueta breve usada en la ficha.
  * @property {string} [image] URL HTTPS o imagen de datos validada.
+ * @property {ProductDetails} [details] Información editorial editable de la ficha pública.
+ */
+
+/**
+ * Contenido detallado configurable desde Admin.
+ * @typedef {Object} ProductDetails
+ * @property {string} description Descripción extendida del producto.
+ * @property {string} ingredients Ingredientes y avisos.
+ * @property {string} package Presentación y cantidad.
+ * @property {string} instructions Instrucciones de uso.
+ * @property {string[]} benefits Lista de beneficios.
+ * @property {number} rating Promedio de calificación de 0 a 5.
+ * @property {number} reviewCount Total de reseñas.
+ * @property {ProductReview[]} reviews Reseñas mostradas en la ficha.
+ * @property {string[]} [recommendedProductIds] Productos recomendados configurados en Admin.
+ */
+
+/**
+ * Opinión visible en la sección de reseñas del producto.
+ * @typedef {Object} ProductReview
+ * @property {string} author Nombre mostrado del cliente.
+ * @property {number} rating Calificación entera de 1 a 5.
+ * @property {string} date Fecha o etiqueta de antigüedad mostrada.
+ * @property {string} text Texto de la opinión.
  */
 
 /**

@@ -3,6 +3,8 @@ import { DATA_KEY, isValidImage, saveCatalog } from "../services/catalogStorage.
 import { readAdminData } from "../services/adminStorage.js";
 import { makeId, money } from "../shared/format.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
+import { getProductDetails, getRecommendedProducts } from "../data/productDetails.js";
+import { ProductDetail } from "../shared/ProductDetail.jsx";
 import { Brand, Field, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
 /** Claves y reglas de negocio usadas por las operaciones del portal Admin. */
@@ -19,6 +21,369 @@ const NAVIGATION = [
   ["sales", "↗", "Ventas"],
   ["admins", "♧", "Administradores"],
 ];
+
+/**
+ * Campos editoriales del producto y previsualización en vivo de la ficha pública.
+ * @param {{record: import("../models.js").Product|null, categories: string[], products: import("../models.js").Product[]}} props
+ */
+function ProductFields({ record, categories, products }) {
+  const initialDetails = getProductDetails(
+    record || {
+      id: "",
+      name: "",
+      sku: "",
+      category: categories[0] || "",
+      detail: "",
+      price: 1,
+      stock: 0,
+    }
+  );
+  const recommendationSource = record || {
+    id: "product-preview",
+    category: categories[0] || "",
+  };
+  const initialRecommendations =
+    initialDetails.recommendedProductIds ||
+    getRecommendedProducts(recommendationSource, products).map((product) => product.id);
+  const [showPreview, setShowPreview] = useState(false);
+  // Los campos permanecen como texto; se convierten al modelo al guardar.
+  const [draft, setDraft] = useState(() => ({
+    name: record?.name || "",
+    sku: record?.sku || "",
+    category: record?.category || categories[0] || "",
+    detail: record?.detail || "",
+    price: String(record?.price ?? ""),
+    stock: String(record?.stock ?? 0),
+    badge: record?.badge || "",
+    image: record?.image?.startsWith("http") ? record.image : "",
+    description: initialDetails.description,
+    ingredients: initialDetails.ingredients,
+    package: initialDetails.package,
+    instructions: initialDetails.instructions,
+    benefits: initialDetails.benefits.join("\n"),
+    rating: String(initialDetails.rating),
+    reviewCount: String(initialDetails.reviewCount),
+    reviews: initialDetails.reviews.map((review) => ({ ...review })),
+    recommendedProductIds: initialRecommendations,
+  }));
+  const update = (event) =>
+    setDraft((current) => ({ ...current, [event.target.name]: event.target.value }));
+  // Construye el producto público con el borrador para previsualizar sin guardar.
+  const previewProduct = {
+    ...record,
+    id: record?.id || "product-preview",
+    name: draft.name || "Nombre del producto",
+    sku: draft.sku || "SKU",
+    category: draft.category,
+    detail: draft.detail,
+    price: Number(draft.price) || 0,
+    stock: Number(draft.stock) || 0,
+    image: draft.image || record?.image || DEFAULT_PRODUCTS[0].image,
+    badge: draft.badge,
+    details: {
+      description: draft.description,
+      ingredients: draft.ingredients,
+      package: draft.package,
+      instructions: draft.instructions,
+      benefits: draft.benefits
+        .split("\n")
+        .map((benefit) => benefit.trim())
+        .filter(Boolean),
+      rating: Number(draft.rating) || 0,
+      reviewCount: Number(draft.reviewCount) || 0,
+      reviews: draft.reviews,
+      ...(draft.recommendedProductIds.length
+        ? { recommendedProductIds: draft.recommendedProductIds }
+        : {}),
+    },
+  };
+  const previewProducts = record
+    ? products.map((product) => (product.id === record.id ? previewProduct : product))
+    : [...products, previewProduct];
+
+  return (
+    <>
+      <Field
+        label="Nombre del producto"
+        name="name"
+        value={draft.name}
+        onChange={update}
+        required
+        maxLength={100}
+      />
+      <Field label="SKU" name="sku" value={draft.sku} onChange={update} required maxLength={30} />
+      <label>
+        <span className="label">Categoría</span>
+        <select className="input" name="category" value={draft.category} onChange={update} required>
+          {categories.map((category) => (
+            <option key={category}>{category}</option>
+          ))}
+        </select>
+      </label>
+      <Field
+        label="Descripción breve"
+        name="detail"
+        value={draft.detail}
+        onChange={update}
+        maxLength={120}
+      />
+      <Field
+        label="Etiqueta de producto (opcional)"
+        name="badge"
+        value={draft.badge}
+        onChange={update}
+        maxLength={40}
+      />
+      <Field
+        label="Precio (USD)"
+        name="price"
+        type="number"
+        min="0.01"
+        step="0.01"
+        value={draft.price}
+        onChange={update}
+        required
+      />
+      <Field
+        label="Existencias"
+        name="stock"
+        type="number"
+        min="0"
+        step="1"
+        value={draft.stock}
+        onChange={update}
+        required
+      />
+      <Field
+        label="URL de imagen"
+        name="image"
+        type="url"
+        value={draft.image}
+        onChange={update}
+        className="sm:col-span-2"
+      />
+      <label className="sm:col-span-2">
+        <span className="label">Subir imagen (máximo 2 MB)</span>
+        <input
+          className="input file:mr-4 file:rounded-full file:border-0 file:bg-[#eef0e6] file:px-4 file:py-2"
+          name="imageFile"
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            // Previsualiza el archivo; el envío vuelve a validar el archivo antes de guardarlo.
+            const reader = new FileReader();
+            reader.onload = () =>
+              setDraft((current) => ({ ...current, image: String(reader.result) }));
+            reader.onerror = () =>
+              console.error("No se pudo preparar la vista previa de la imagen.", reader.error);
+            reader.readAsDataURL(file);
+          }}
+        />
+        <span className="mt-1 block text-xs text-muted">
+          Al subir un archivo se usará en lugar de la URL.
+        </span>
+      </label>
+      <div className="sm:col-span-2">
+        <h3 className="font-display text-xl">Información detallada de la ficha</h3>
+        <p className="mt-1 text-xs text-muted">
+          Esta información se guarda en el producto y aparece en su página pública.
+        </p>
+      </div>
+      {[
+        ["description", "Descripción del producto", 600],
+        ["ingredients", "Ingredientes", 600],
+        ["package", "Presentación o cantidad", 240],
+        ["instructions", "Instrucciones de uso", 600],
+      ].map(([name, label, maxLength]) => (
+        <label key={name} className="sm:col-span-2">
+          <span className="label">{label}</span>
+          <textarea
+            className="input min-h-20"
+            name={name}
+            value={draft[name]}
+            onChange={update}
+            maxLength={maxLength}
+            rows={3}
+          />
+        </label>
+      ))}
+      <label className="sm:col-span-2">
+        <span className="label">Beneficios (un beneficio por línea)</span>
+        <textarea
+          className="input min-h-24"
+          name="benefits"
+          value={draft.benefits}
+          onChange={update}
+          maxLength={1200}
+          rows={4}
+        />
+      </label>
+      <Field
+        label="Promedio de calificación (0 a 5)"
+        name="rating"
+        type="number"
+        min="0"
+        max="5"
+        step="0.1"
+        value={draft.rating}
+        onChange={update}
+        required
+      />
+      <Field
+        label="Número total de reseñas"
+        name="reviewCount"
+        type="number"
+        min="0"
+        step="1"
+        value={draft.reviewCount}
+        onChange={update}
+        required
+      />
+      <fieldset className="sm:col-span-2">
+        <legend className="label">Productos recomendados</legend>
+        <p className="mb-3 text-xs text-muted">
+          Selecciona hasta cuatro productos. Sin selecciones se recomiendan automáticamente
+          productos de la misma categoría.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {products
+            .filter((product) => product.id !== record?.id)
+            .map((product, index) => (
+              <label key={product.id} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  name={`recommendedProductId-${index}`}
+                  value={product.id}
+                  checked={draft.recommendedProductIds.includes(product.id)}
+                  disabled={
+                    !draft.recommendedProductIds.includes(product.id) &&
+                    draft.recommendedProductIds.length >= 4
+                  }
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      recommendedProductIds: event.target.checked
+                        ? [...current.recommendedProductIds, product.id]
+                        : current.recommendedProductIds.filter((id) => id !== product.id),
+                    }))
+                  }
+                  className="accent-[#25483b]"
+                />
+                {product.name}
+              </label>
+            ))}
+        </div>
+      </fieldset>
+      <div className="sm:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="font-display text-xl">Reseñas que se mostrarán</h3>
+          <button
+            className="btn-secondary"
+            type="button"
+            onClick={() =>
+              setDraft((current) => ({
+                ...current,
+                reviews: [...current.reviews, { author: "", rating: 5, date: "", text: "" }],
+              }))
+            }
+          >
+            ＋ Agregar reseña
+          </button>
+        </div>
+        <p className="mt-1 text-xs text-muted">
+          El total puede incluir reseñas que no se muestran en esta lista.
+        </p>
+        <div className="mt-4 grid gap-4">
+          {draft.reviews.map((review, index) => (
+            <fieldset key={index} className="rounded-lg border border-line p-4">
+              <legend className="px-1 text-sm font-semibold">Reseña {index + 1}</legend>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {[
+                  ["author", "Nombre del cliente"],
+                  ["rating", "Estrellas (1 a 5)"],
+                  ["date", "Fecha o antigüedad"],
+                ].map(([field, label]) => (
+                  <label key={field}>
+                    <span className="label">{label}</span>
+                    <input
+                      className="input"
+                      type={field === "rating" ? "number" : "text"}
+                      name={`review-${field}-${index}`}
+                      min={field === "rating" ? "1" : undefined}
+                      max={field === "rating" ? "5" : undefined}
+                      step={field === "rating" ? "1" : undefined}
+                      value={review[field]}
+                      onChange={(event) => {
+                        const { value } = event.target;
+                        setDraft((current) => ({
+                          ...current,
+                          reviews: current.reviews.map((item, itemIndex) =>
+                            itemIndex === index ? { ...item, [field]: value } : item
+                          ),
+                        }));
+                      }}
+                      required={field !== "date"}
+                      maxLength={field === "author" ? 80 : 40}
+                    />
+                  </label>
+                ))}
+                <label className="sm:col-span-2">
+                  <span className="label">Comentario</span>
+                  <textarea
+                    className="input min-h-20"
+                    name={`review-text-${index}`}
+                    value={review.text}
+                    onChange={(event) => {
+                      const { value } = event.target;
+                      setDraft((current) => ({
+                        ...current,
+                        reviews: current.reviews.map((item, itemIndex) =>
+                          itemIndex === index ? { ...item, text: value } : item
+                        ),
+                      }));
+                    }}
+                    maxLength={500}
+                    required
+                    rows={2}
+                  />
+                </label>
+                <button
+                  className="text-left text-sm font-semibold text-[#9d5144] underline underline-offset-4 sm:col-span-2"
+                  type="button"
+                  onClick={() =>
+                    setDraft((current) => ({
+                      ...current,
+                      reviews: current.reviews.filter((_, itemIndex) => itemIndex !== index),
+                    }))
+                  }
+                >
+                  Eliminar reseña
+                </button>
+              </div>
+            </fieldset>
+          ))}
+        </div>
+      </div>
+      <div className="sm:col-span-2">
+        <button
+          className="btn-secondary"
+          type="button"
+          aria-expanded={showPreview}
+          onClick={() => setShowPreview((visible) => !visible)}
+        >
+          {showPreview ? "Ocultar vista previa" : "Vista previa de la ficha pública"}
+        </button>
+        {showPreview && (
+          <div className="mt-4 overflow-hidden rounded-xl border border-line bg-white">
+            <ProductDetail product={previewProduct} products={previewProducts} preview />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 /**
  * Diálogo reutilizable que construye y valida formularios de entidades Admin.
@@ -68,78 +433,10 @@ function AdminModal({ form, close, save, data }) {
       setBusy(false);
     }
   };
-  const productFields = (
-    <>
-      <Field
-        label="Nombre del producto"
-        name="name"
-        defaultValue={record?.name || ""}
-        required
-        maxLength={100}
-      />
-      <Field label="SKU" name="sku" defaultValue={record?.sku || ""} required maxLength={30} />
-      <label>
-        <span className="label">Categoría</span>
-        <select
-          className="input"
-          name="category"
-          defaultValue={record?.category || data.categories[0]}
-          required
-        >
-          {data.categories.map((category) => (
-            <option key={category}>{category}</option>
-          ))}
-        </select>
-      </label>
-      <Field
-        label="Descripción breve"
-        name="detail"
-        defaultValue={record?.detail || ""}
-        maxLength={120}
-      />
-      <Field
-        label="Precio (USD)"
-        name="price"
-        type="number"
-        min="0.01"
-        step="0.01"
-        defaultValue={record?.price ?? ""}
-        required
-      />
-      <Field
-        label="Existencias"
-        name="stock"
-        type="number"
-        min="0"
-        step="1"
-        defaultValue={record?.stock ?? 0}
-        required
-      />
-      <Field
-        label="URL de imagen"
-        name="image"
-        type="url"
-        defaultValue={record?.image?.startsWith("http") ? record.image : ""}
-        className="sm:col-span-2"
-      />
-      <label className="sm:col-span-2">
-        <span className="label">Subir imagen (máximo 2 MB)</span>
-        <input
-          className="input file:mr-4 file:rounded-full file:border-0 file:bg-[#eef0e6] file:px-4 file:py-2"
-          name="imageFile"
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/gif"
-        />
-        <span className="mt-1 block text-xs text-muted">
-          Al subir un archivo se usará en lugar de la URL.
-        </span>
-      </label>
-    </>
-  );
   let fields;
   if (type === "product")
     fields = data.categories.length ? (
-      productFields
+      <ProductFields record={record} categories={data.categories} products={data.products} />
     ) : (
       <p className="rounded bg-[#fbf1e8] p-3 text-sm text-[#8d542c]">
         Primero crea una categoría para asignarla al producto.
@@ -228,7 +525,7 @@ function AdminModal({ form, close, save, data }) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="admin-dialog-title"
-        className="my-5 w-full max-w-2xl rounded-xl bg-white p-5 shadow-2xl sm:p-7"
+        className={`my-5 w-full rounded-xl bg-white p-5 shadow-2xl sm:p-7 ${type === "product" ? "max-w-5xl" : "max-w-2xl"}`}
       >
         <div className="mb-5 flex items-start justify-between">
           <div>
@@ -421,6 +718,70 @@ export function Admin() {
       const image = values.image?.trim() || record?.image || "";
       if (image && !isValidImage(image))
         throw new Error("Escribe una URL HTTPS válida o selecciona una imagen permitida.");
+      const rating = Number(values.rating);
+      const reviewCount = Number(values.reviewCount);
+      // Los nombres llevan el índice para reconstruir cada reseña desde FormData.
+      const reviewsByIndex = new Map();
+      Object.entries(values).forEach(([key, value]) => {
+        const match = key.match(/^review-(author|rating|date|text)-(\d+)$/);
+        if (!match) return;
+        const [, field, index] = match;
+        const review = reviewsByIndex.get(index) || {
+          author: "",
+          rating: "",
+          date: "",
+          text: "",
+        };
+        review[field] = value;
+        reviewsByIndex.set(index, review);
+      });
+      const reviews = [...reviewsByIndex.values()].map((review) => ({
+        author: review.author.trim(),
+        rating: Number(review.rating),
+        date: review.date.trim(),
+        text: review.text.trim(),
+      }));
+      const benefits = values.benefits
+        .split("\n")
+        .map((benefit) => benefit.trim())
+        .filter(Boolean);
+      const recommendedProductIds = Object.entries(values)
+        .filter(([key]) => key.startsWith("recommendedProductId-"))
+        .map(([, id]) => id);
+      // Valida el contenido editorial y las relaciones antes de persistir el producto.
+      if (
+        !values.description.trim() ||
+        !values.ingredients.trim() ||
+        !values.package.trim() ||
+        !values.instructions.trim() ||
+        !benefits.length
+      )
+        throw new Error("Completa la descripción, ingredientes, presentación, uso y beneficios.");
+      if (!Number.isFinite(rating) || rating < 0 || rating > 5)
+        throw new Error("El promedio de calificación debe estar entre 0 y 5.");
+      if (!Number.isInteger(reviewCount) || reviewCount < reviews.length)
+        throw new Error(
+          "El total de reseñas debe ser un entero igual o mayor a las reseñas listadas."
+        );
+      if (
+        recommendedProductIds.length > 4 ||
+        new Set(recommendedProductIds).size !== recommendedProductIds.length ||
+        recommendedProductIds.some(
+          (id) => id === record?.id || !data.products.some((item) => item.id === id)
+        )
+      )
+        throw new Error("Selecciona hasta cuatro productos recomendados válidos.");
+      if (
+        reviews.some(
+          (review) =>
+            !review.author ||
+            !review.text ||
+            !Number.isInteger(review.rating) ||
+            review.rating < 1 ||
+            review.rating > 5
+        )
+      )
+        throw new Error("Completa el nombre, comentario y calificación (1 a 5) de cada reseña.");
       const product = {
         ...record,
         id: record?.id || makeId("product"),
@@ -430,6 +791,18 @@ export function Admin() {
         detail: values.detail.trim(),
         price,
         stock,
+        details: {
+          description: values.description.trim(),
+          ingredients: values.ingredients.trim(),
+          package: values.package.trim(),
+          instructions: values.instructions.trim(),
+          benefits,
+          rating,
+          reviewCount,
+          reviews,
+          ...(recommendedProductIds.length ? { recommendedProductIds } : {}),
+        },
+        badge: values.badge.trim(),
         ...(image ? { image } : {}),
       };
       next.products = record
@@ -529,6 +902,20 @@ export function Admin() {
       return;
     }
     const next = { ...data, [collection]: data[collection].filter((item) => item.id !== id) };
+    if (collection === "products") {
+      next.products = next.products.map((product) => {
+        if (!product.details?.recommendedProductIds?.includes(id)) return product;
+        const recommendedProductIds = product.details.recommendedProductIds.filter(
+          (productId) => productId !== id
+        );
+        const details = { ...product.details };
+        delete details.recommendedProductIds;
+        return {
+          ...product,
+          details: recommendedProductIds.length ? { ...details, recommendedProductIds } : details,
+        };
+      });
+    }
     if (persist(next)) notify(`${label} eliminado.`);
   };
 

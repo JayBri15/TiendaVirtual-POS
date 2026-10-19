@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { CART_KEY, DATA_KEY, loadCart, readCatalog, saveCart } from "../services/catalogStorage.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
+import { getProductDetails } from "../data/productDetails.js";
 import { money } from "../shared/format.js";
+import { ProductDetail } from "../shared/ProductDetail.jsx";
 import {
   Brand,
   SectionTitle,
@@ -18,8 +20,9 @@ const categoryArt = ["bg-[#dfe7d6]", "bg-[#eedfd9]", "bg-[#d9e3de]", "bg-[#e9e5d
  */
 function ProductCard({ product, onAdd }) {
   const unavailable = product.stock <= 0;
+  const details = getProductDetails(product);
   return (
-    <article className="group overflow-hidden rounded-lg border border-[#e5e5dc] bg-white transition hover:-translate-y-1 hover:shadow-xl">
+    <article className="group relative overflow-hidden rounded-lg border border-[#e5e5dc] bg-white transition hover:-translate-y-1 hover:shadow-xl">
       <div className="relative aspect-[4/4.5] overflow-hidden bg-[#f1f0e9]">
         <img
           className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
@@ -35,21 +38,22 @@ function ProductCard({ product, onAdd }) {
             Agotado
           </span>
         )}
-        {!unavailable && (
-          <button
-            onClick={() => onAdd(product)}
-            className="absolute bottom-3 right-3 grid h-11 w-11 place-items-center rounded-full bg-leaf text-2xl text-white shadow-lg transition hover:bg-[#17372b]"
-            aria-label={`Agregar ${product.name} al carrito`}
-          >
-            +
-          </button>
-        )}
       </div>
       <div className="p-4 sm:p-5">
         <p className="text-xs text-muted">
           {product.category} <span className="px-1">·</span> {product.detail}
         </p>
         <h3 className="mt-2 min-h-12 font-display text-lg leading-snug">{product.name}</h3>
+        <div
+          className="mt-2 flex items-center gap-2 text-sm"
+          aria-label={`Calificación ${details.rating} de 5, ${details.reviewCount} reseñas`}
+        >
+          <span className={details.rating ? "text-[#c89a31]" : "text-[#a8aca3]"} aria-hidden="true">
+            {details.rating ? "★".repeat(Math.round(details.rating)) : "☆☆☆☆☆"}
+          </span>
+          <span>{details.rating ? details.rating.toFixed(1) : "Sin reseñas"}</span>
+          <span className="text-muted">({details.reviewCount})</span>
+        </div>
         <div className="mt-4 flex items-end justify-between gap-3">
           <strong>{money(product.price)}</strong>
           <span className={`text-xs ${product.stock <= 5 ? "text-[#a25836]" : "text-muted"}`}>
@@ -57,6 +61,22 @@ function ProductCard({ product, onAdd }) {
           </span>
         </div>
       </div>
+      <a
+        href={`#producto/${encodeURIComponent(product.id)}`}
+        className="absolute inset-0 z-10 rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf"
+        aria-label={`Ver detalles de ${product.name}`}
+      >
+        <span className="sr-only">Ver detalles de {product.name}</span>
+      </a>
+      {!unavailable && (
+        <button
+          onClick={() => onAdd(product)}
+          className="absolute right-3 top-3 z-20 grid h-11 w-11 place-items-center rounded-full bg-leaf text-2xl text-white shadow-lg transition hover:bg-[#17372b]"
+          aria-label={`Agregar ${product.name} al carrito`}
+        >
+          +
+        </button>
+      )}
     </article>
   );
 }
@@ -460,6 +480,13 @@ export function Storefront() {
   const [route, setRoute] = useState(window.location.hash.replace("#", ""));
   const { notify, region } = useNotice();
   const accountMode = ["iniciar-sesion", "crear-cuenta"].includes(route);
+  const productRouteId = route.startsWith("producto/")
+    ? route.slice("producto/".length).split("/")[0]
+    : "";
+  const selectedProduct = catalog.products.find(
+    (product) => encodeURIComponent(product.id) === productRouteId
+  );
+  const isProduct = Boolean(selectedProduct);
   const isCategory = catalog.categories.includes(decodeURIComponent(route));
 
   // Reduce el header fijo al desplazarse para dejar más espacio al contenido.
@@ -501,6 +528,15 @@ export function Storefront() {
       window.removeEventListener("hashchange", syncRoute);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!isProduct) return;
+    if (route.endsWith("/resenas")) {
+      document.getElementById("resenas")?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [isProduct, route]);
 
   // Aplica categoría y texto de búsqueda sin modificar el catálogo original.
   const filteredProducts = useMemo(() => {
@@ -661,181 +697,197 @@ export function Storefront() {
       ) : (
         <>
           <main>
-            {isCategory ? (
-              <section className="bg-[#e8ebe0] px-5 py-12 sm:px-8 sm:py-16">
-                <div className="mx-auto max-w-7xl">
-                  <a
-                    href="./#inicio"
-                    className="text-sm font-semibold text-leaf underline underline-offset-4"
-                  >
-                    ← Volver a la página principal
-                  </a>
-                  <p className="mt-10 text-xs font-bold uppercase tracking-[.2em] text-[#66764e]">
-                    Explora la categoría
-                  </p>
-                  <h1 className="mt-3 font-display text-4xl sm:text-6xl">
-                    {decodeURIComponent(route)}
-                  </h1>
-                  <p className="mt-4 max-w-xl text-base leading-7 text-muted">
-                    Encuentra productos seleccionados de {decodeURIComponent(route)} para
-                    acompañarte cada día.
-                  </p>
-                </div>
-              </section>
+            {isProduct ? (
+              <ProductDetail
+                product={selectedProduct}
+                products={catalog.products}
+                onAdd={(item) => changeCart(item.id, 1)}
+              />
             ) : (
               <>
-                <section id="inicio" className="relative isolate overflow-hidden bg-[#e8ebe0]">
-                  <div className="absolute inset-0 -z-10 bg-[url('https://images.unsplash.com/photo-1547887538-e3a2f32cb1cc?auto=format&fit=crop&w=1800&q=85')] bg-cover bg-center opacity-20" />
-                  <div className="mx-auto grid min-h-[33rem] max-w-7xl items-center gap-12 px-5 py-16 sm:px-8 lg:grid-cols-[1fr_.8fr] lg:py-20">
-                    <div className="max-w-2xl">
-                      <p className="mb-5 flex items-center gap-3 text-xs font-bold uppercase tracking-[.2em] text-[#66764e]">
-                        <span className="h-px w-8 bg-[#66764e]" />
-                        Bienestar, a tu manera
+                {isCategory ? (
+                  <section className="bg-[#e8ebe0] px-5 py-12 sm:px-8 sm:py-16">
+                    <div className="mx-auto max-w-7xl">
+                      <a
+                        href="./#inicio"
+                        className="text-sm font-semibold text-leaf underline underline-offset-4"
+                      >
+                        ← Volver a la página principal
+                      </a>
+                      <p className="mt-10 text-xs font-bold uppercase tracking-[.2em] text-[#66764e]">
+                        Explora la categoría
                       </p>
-                      <h1 className="font-display text-5xl leading-[1.08] sm:text-6xl lg:text-7xl">
-                        Pequeñas elecciones.
-                        <br />
-                        <em className="text-leaf">Una vida más plena.</em>
+                      <h1 className="mt-3 font-display text-4xl sm:text-6xl">
+                        {decodeURIComponent(route)}
                       </h1>
-                      <p className="mt-6 max-w-lg text-base leading-7 text-muted">
-                        Encuentra tus esenciales para sentirte bien, cuidar de los tuyos y hacer de
-                        cada día algo mejor.
+                      <p className="mt-4 max-w-xl text-base leading-7 text-muted">
+                        Encuentra productos seleccionados de {decodeURIComponent(route)} para
+                        acompañarte cada día.
                       </p>
-                      <a href="#todos-productos" className="btn-primary mt-8">
-                        Explorar productos <span aria-hidden="true">→</span>
-                      </a>
-                      <div className="mt-12 flex items-center gap-3 text-xs text-muted">
-                        <span className="grid h-9 w-9 place-items-center rounded-full bg-lime font-display text-lg font-bold">
-                          A
-                        </span>
-                        Calidad pensada para acompañarte
-                        <br />
-                        en cada momento.
-                      </div>
                     </div>
-                    <div className="relative hidden aspect-[4/4.2] overflow-hidden rounded-[45%_45%_8px_8px] bg-[#c5cbb4] lg:block">
-                      <img
-                        className="h-full w-full object-cover mix-blend-multiply"
-                        src="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?auto=format&fit=crop&w=1000&q=85"
-                        alt="Productos de cuidado y bienestar"
-                      />
-                      <div className="absolute bottom-5 left-5 rounded bg-white/90 px-4 py-3 text-xs">
-                        <strong className="block uppercase tracking-widest">AMWAY</strong>Bienestar
-                        desde 1959
-                      </div>
-                    </div>
-                  </div>
-                </section>
-                <section id="categorias" className="mx-auto max-w-7xl px-5 py-16 sm:px-8 sm:py-24">
-                  <SectionTitle
-                    eyebrow="Encuentra tu favorito"
-                    title={
-                      <>
-                        Un mundo de <em>posibilidades</em>
-                      </>
-                    }
-                    description="Explora las categorías y encuentra aquello que acompaña tu bienestar."
-                    action={
-                      <a
-                        href="#todos-productos"
-                        className="hidden text-sm font-semibold text-leaf underline underline-offset-4 sm:block"
-                      >
-                        Ver todos los productos →
-                      </a>
-                    }
-                  />
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {catalog.categories.map((category, index) => (
-                      <a
-                        key={category}
-                        href={`#${encodeURIComponent(category)}`}
-                        onClick={() => setActiveCategory(category)}
-                        className={`group relative flex min-h-48 flex-col justify-between overflow-hidden rounded-lg p-6 ${categoryArt[index % categoryArt.length]} transition hover:-translate-y-1`}
-                      >
-                        <span className="text-xs font-bold uppercase tracking-[.15em] text-leaf">
-                          0{index + 1}
-                        </span>
-                        <span className="font-display text-2xl">{category}</span>
-                        <span className="absolute right-5 top-5 text-4xl text-leaf/25 transition group-hover:translate-x-1">
-                          ↗
-                        </span>
-                      </a>
-                    ))}
-                  </div>
-                </section>
-              </>
-            )}
-            <section id="todos-productos" className="scroll-mt-28 bg-white py-16 sm:py-24">
-              <div className="mx-auto max-w-7xl px-5 sm:px-8">
-                <SectionTitle
-                  eyebrow="Lo nuevo para ti"
-                  title={
-                    isCategory ? (
-                      <>
-                        {decodeURIComponent(route)} <em>para cada día</em>
-                      </>
-                    ) : (
-                      <>
-                        Esenciales <em>para sentirte bien</em>
-                      </>
-                    )
-                  }
-                  description="Productos seleccionados para acompañar tus rutinas y momentos."
-                />
-                <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-                  <div className="flex gap-2 overflow-x-auto">
-                    {["Todos", ...catalog.categories].map((category) => (
-                      <button
-                        key={category}
-                        onClick={() => {
-                          setActiveCategory(category);
-                          if (isCategory)
-                            window.location.hash =
-                              category === "Todos"
-                                ? "todos-productos"
-                                : encodeURIComponent(category);
-                        }}
-                        className={`whitespace-nowrap rounded-full border px-4 py-2 text-xs ${(isCategory ? decodeURIComponent(route) : activeCategory) === category ? "border-leaf bg-leaf text-white" : "border-line hover:bg-paper"}`}
-                      >
-                        {category}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="text-xs text-muted">{filteredProducts.length} productos</span>
-                </div>
-                <div className="mb-6 md:hidden">
-                  <ProductSearch
-                    query={query}
-                    onQueryChange={setQuery}
-                    products={searchMatches}
-                    onSelect={selectSearchResult}
-                  />
-                </div>
-                {filteredProducts.length ? (
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {filteredProducts.map((product) => (
-                      <ProductCard
-                        key={product.id}
-                        product={product}
-                        onAdd={(item) => changeCart(item.id, 1)}
-                      />
-                    ))}
-                  </div>
+                  </section>
                 ) : (
-                  <div className="rounded-lg bg-paper p-12 text-center text-muted">
-                    No encontramos productos con esa búsqueda.
-                  </div>
+                  <>
+                    <section id="inicio" className="relative isolate overflow-hidden bg-[#e8ebe0]">
+                      <div className="absolute inset-0 -z-10 bg-[url('https://images.unsplash.com/photo-1547887538-e3a2f32cb1cc?auto=format&fit=crop&w=1800&q=85')] bg-cover bg-center opacity-20" />
+                      <div className="mx-auto grid min-h-[33rem] max-w-7xl items-center gap-12 px-5 py-16 sm:px-8 lg:grid-cols-[1fr_.8fr] lg:py-20">
+                        <div className="max-w-2xl">
+                          <p className="mb-5 flex items-center gap-3 text-xs font-bold uppercase tracking-[.2em] text-[#66764e]">
+                            <span className="h-px w-8 bg-[#66764e]" />
+                            Bienestar, a tu manera
+                          </p>
+                          <h1 className="font-display text-5xl leading-[1.08] sm:text-6xl lg:text-7xl">
+                            Pequeñas elecciones.
+                            <br />
+                            <em className="text-leaf">Una vida más plena.</em>
+                          </h1>
+                          <p className="mt-6 max-w-lg text-base leading-7 text-muted">
+                            Encuentra tus esenciales para sentirte bien, cuidar de los tuyos y hacer
+                            de cada día algo mejor.
+                          </p>
+                          <a href="#todos-productos" className="btn-primary mt-8">
+                            Explorar productos <span aria-hidden="true">→</span>
+                          </a>
+                          <div className="mt-12 flex items-center gap-3 text-xs text-muted">
+                            <span className="grid h-9 w-9 place-items-center rounded-full bg-lime font-display text-lg font-bold">
+                              A
+                            </span>
+                            Calidad pensada para acompañarte
+                            <br />
+                            en cada momento.
+                          </div>
+                        </div>
+                        <div className="relative hidden aspect-[4/4.2] overflow-hidden rounded-[45%_45%_8px_8px] bg-[#c5cbb4] lg:block">
+                          <img
+                            className="h-full w-full object-cover mix-blend-multiply"
+                            src="https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?auto=format&fit=crop&w=1000&q=85"
+                            alt="Productos de cuidado y bienestar"
+                          />
+                          <div className="absolute bottom-5 left-5 rounded bg-white/90 px-4 py-3 text-xs">
+                            <strong className="block uppercase tracking-widest">AMWAY</strong>
+                            Bienestar desde 1959
+                          </div>
+                        </div>
+                      </div>
+                    </section>
+                    <section
+                      id="categorias"
+                      className="mx-auto max-w-7xl px-5 py-16 sm:px-8 sm:py-24"
+                    >
+                      <SectionTitle
+                        eyebrow="Encuentra tu favorito"
+                        title={
+                          <>
+                            Un mundo de <em>posibilidades</em>
+                          </>
+                        }
+                        description="Explora las categorías y encuentra aquello que acompaña tu bienestar."
+                        action={
+                          <a
+                            href="#todos-productos"
+                            className="hidden text-sm font-semibold text-leaf underline underline-offset-4 sm:block"
+                          >
+                            Ver todos los productos →
+                          </a>
+                        }
+                      />
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        {catalog.categories.map((category, index) => (
+                          <a
+                            key={category}
+                            href={`#${encodeURIComponent(category)}`}
+                            onClick={() => setActiveCategory(category)}
+                            className={`group relative flex min-h-48 flex-col justify-between overflow-hidden rounded-lg p-6 ${categoryArt[index % categoryArt.length]} transition hover:-translate-y-1`}
+                          >
+                            <span className="text-xs font-bold uppercase tracking-[.15em] text-leaf">
+                              0{index + 1}
+                            </span>
+                            <span className="font-display text-2xl">{category}</span>
+                            <span className="absolute right-5 top-5 text-4xl text-leaf/25 transition group-hover:translate-x-1">
+                              ↗
+                            </span>
+                          </a>
+                        ))}
+                      </div>
+                    </section>
+                  </>
                 )}
-              </div>
-            </section>
-            {!isCategory && (
-              <section className="bg-leaf px-5 py-16 text-center text-white sm:py-20">
-                <p className="text-xs uppercase tracking-[.22em] text-lime">Nuestra promesa</p>
-                <h2 className="mt-3 font-display text-4xl sm:text-5xl">AMWAYPROMISE</h2>
-                <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/75">
-                  La satisfacción siempre será nuestro objetivo y la protección, nuestra promesa.
-                </p>
-              </section>
+                <section id="todos-productos" className="scroll-mt-28 bg-white py-16 sm:py-24">
+                  <div className="mx-auto max-w-7xl px-5 sm:px-8">
+                    <SectionTitle
+                      eyebrow="Lo nuevo para ti"
+                      title={
+                        isCategory ? (
+                          <>
+                            {decodeURIComponent(route)} <em>para cada día</em>
+                          </>
+                        ) : (
+                          <>
+                            Esenciales <em>para sentirte bien</em>
+                          </>
+                        )
+                      }
+                      description="Productos seleccionados para acompañar tus rutinas y momentos."
+                    />
+                    <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex gap-2 overflow-x-auto">
+                        {["Todos", ...catalog.categories].map((category) => (
+                          <button
+                            key={category}
+                            onClick={() => {
+                              setActiveCategory(category);
+                              if (isCategory)
+                                window.location.hash =
+                                  category === "Todos"
+                                    ? "todos-productos"
+                                    : encodeURIComponent(category);
+                            }}
+                            className={`whitespace-nowrap rounded-full border px-4 py-2 text-xs ${(isCategory ? decodeURIComponent(route) : activeCategory) === category ? "border-leaf bg-leaf text-white" : "border-line hover:bg-paper"}`}
+                          >
+                            {category}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-xs text-muted">
+                        {filteredProducts.length} productos
+                      </span>
+                    </div>
+                    <div className="mb-6 md:hidden">
+                      <ProductSearch
+                        query={query}
+                        onQueryChange={setQuery}
+                        products={searchMatches}
+                        onSelect={selectSearchResult}
+                      />
+                    </div>
+                    {filteredProducts.length ? (
+                      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        {filteredProducts.map((product) => (
+                          <ProductCard
+                            key={product.id}
+                            product={product}
+                            onAdd={(item) => changeCart(item.id, 1)}
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg bg-paper p-12 text-center text-muted">
+                        No encontramos productos con esa búsqueda.
+                      </div>
+                    )}
+                  </div>
+                </section>
+                {!isCategory && (
+                  <section className="bg-leaf px-5 py-16 text-center text-white sm:py-20">
+                    <p className="text-xs uppercase tracking-[.22em] text-lime">Nuestra promesa</p>
+                    <h2 className="mt-3 font-display text-4xl sm:text-5xl">AMWAYPROMISE</h2>
+                    <p className="mx-auto mt-4 max-w-xl text-sm leading-6 text-white/75">
+                      La satisfacción siempre será nuestro objetivo y la protección, nuestra
+                      promesa.
+                    </p>
+                  </section>
+                )}
+              </>
             )}
           </main>
           <footer className="flex flex-col items-center justify-between gap-4 px-6 py-8 text-sm text-muted sm:flex-row sm:px-10">

@@ -5,6 +5,7 @@ import {
   DATA_KEY,
   getDefaultCatalog,
   isValidImage,
+  isValidProductDetails,
   loadCart,
   normalizeCart,
   readCatalog,
@@ -49,6 +50,30 @@ describe("servicio de catálogo y carrito", () => {
     assert.equal(isValidImage("data:text/html;base64,AAAA"), false);
   });
 
+  it("valida el detalle editorial y las reseñas configuradas para cada producto", () => {
+    const details = {
+      description: "Descripción extendida",
+      ingredients: "Ingredientes",
+      package: "60 tabletas",
+      instructions: "Tomar con alimentos",
+      benefits: ["Beneficio uno"],
+      rating: 4.5,
+      reviewCount: 1,
+      reviews: [{ author: "Cliente", rating: 5, date: "Hoy", text: "Excelente" }],
+    };
+    assert.equal(isValidProductDetails(details), true);
+    assert.equal(isValidProductDetails({ ...details, rating: 6 }), false);
+    assert.equal(isValidProductDetails({ ...details, reviewCount: 0 }), false);
+    assert.equal(
+      isValidProductDetails({ ...details, reviews: [{ ...details.reviews[0], rating: 0 }] }),
+      false
+    );
+    assert.equal(
+      isValidProductDetails({ ...details, recommendedProductIds: ["product-a", "product-a"] }),
+      false
+    );
+  });
+
   it("consolida líneas repetidas y limita cantidad al inventario vigente", () => {
     const { products } = getDefaultCatalog();
     const cart = normalizeCart(
@@ -85,6 +110,24 @@ describe("servicio de catálogo y carrito", () => {
     assert.equal(saveCart(cart), true);
     assert.equal(localStorage.getItem(CART_KEY), JSON.stringify(cart));
     assert.deepEqual(loadCart(loaded.products), cart);
+  });
+
+  it("conserva los detalles personalizados en el catálogo público", () => {
+    const catalog = getDefaultCatalog();
+    catalog.products[0].details = {
+      description: "Descripción editable",
+      ingredients: "Ingredientes actualizados",
+      package: "90 tabletas",
+      instructions: "Usar según la etiqueta",
+      benefits: ["Beneficio personalizado"],
+      rating: 4.2,
+      reviewCount: 5,
+      reviews: [{ author: "Cliente", rating: 4, date: "Hoy", text: "Buen producto" }],
+      recommendedProductIds: [catalog.products[1].id],
+    };
+    saveCatalog(catalog);
+
+    assert.deepEqual(readCatalog().products[0].details, catalog.products[0].details);
   });
 
   it("combina el catálogo público con los registros privados validados de Admin", () => {
