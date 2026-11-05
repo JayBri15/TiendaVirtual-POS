@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails, getRecommendedProducts } from "../data/productDetails.js";
 import { money } from "./format.js";
@@ -11,6 +11,21 @@ export function ProductDetail({ product, products, onAdd, preview = false }) {
   const details = getProductDetails(product);
   const recommendations = getRecommendedProducts(product, products);
   const unavailable = product.stock <= 0;
+  const [added, setAdded] = useState(false);
+  const addedTimer = useRef(null);
+  const [quantity, setQuantity] = useState(1);
+
+  useEffect(() => () => clearTimeout(addedTimer.current), []);
+  useEffect(() => setQuantity(1), [product.id]);
+
+  const addProduct = () => {
+    if (!onAdd || unavailable || preview) return;
+    const addedToCart = onAdd(product, quantity);
+    if (addedToCart === false) return;
+    setAdded(true);
+    clearTimeout(addedTimer.current);
+    addedTimer.current = window.setTimeout(() => setAdded(false), 3000);
+  };
 
   return (
     <>
@@ -95,14 +110,56 @@ export function ProductDetail({ product, products, onAdd, preview = false }) {
                   {details.reviewCount} reseñas
                 </a>
               </div>
-              <button
-                type="button"
-                className="btn-primary mt-7 w-full sm:w-auto"
-                onClick={() => onAdd?.(product)}
-                disabled={unavailable || preview || !onAdd}
-              >
-                {unavailable ? "Agotado" : "Agregar al carrito"}
-              </button>
+              {!preview && (
+                <div className="mt-7 flex flex-wrap items-center gap-3">
+                  {!unavailable && (
+                    <div className="product-detail-counter" aria-label="Cantidad de productos">
+                      <button
+                        type="button"
+                        onClick={() => setQuantity((current) => Math.max(1, current - 1))}
+                        disabled={quantity <= 1}
+                        aria-label="Disminuir cantidad"
+                      >
+                        -
+                      </button>
+                      <input
+                        className="product-detail-quantity-input"
+                        type="number"
+                        min="1"
+                        max={product.stock}
+                        value={quantity}
+                        onChange={(event) =>
+                          setQuantity(
+                            Math.min(
+                              product.stock,
+                              Math.max(1, Math.floor(Number(event.target.value) || 1))
+                            )
+                          )
+                        }
+                        aria-label="Cantidad"
+                      />
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setQuantity((current) => Math.min(product.stock, current + 1))
+                        }
+                        disabled={quantity >= product.stock}
+                        aria-label="Aumentar cantidad"
+                      >
+                        +
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    className={`product-detail-add-button ${added ? "is-added" : ""}`}
+                    onClick={addProduct}
+                    disabled={unavailable || !onAdd}
+                  >
+                    {unavailable ? "Agotado" : added ? "Agregado!" : "Agregar al carrito"}
+                  </button>
+                </div>
+              )}
               <p className="mt-5 text-sm text-muted">{product.detail}</p>
             </div>
           </div>

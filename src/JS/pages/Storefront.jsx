@@ -31,6 +31,18 @@ const categoryArt = ["bg-[#dfe7d6]", "bg-[#eedfd9]", "bg-[#d9e3de]", "bg-[#e9e5d
 function ProductCard({ product, onAdd }) {
   const unavailable = product.stock <= 0;
   const details = getProductDetails(product);
+  const [added, setAdded] = useState(false);
+  const addedTimer = useRef(null);
+
+  useEffect(() => () => clearTimeout(addedTimer.current), []);
+
+  const addProduct = () => {
+    onAdd(product);
+    setAdded(true);
+    clearTimeout(addedTimer.current);
+    addedTimer.current = window.setTimeout(() => setAdded(false), 3000);
+  };
+
   return (
     <article className="group relative overflow-hidden rounded-lg border border-[#e5e5dc] bg-white transition hover:-translate-y-1 hover:shadow-xl">
       <div className="relative aspect-[4/4.5] overflow-hidden bg-[#f1f0e9]">
@@ -80,11 +92,13 @@ function ProductCard({ product, onAdd }) {
       </a>
       {!unavailable && (
         <button
-          onClick={() => onAdd(product)}
-          className="absolute right-3 top-3 z-20 grid h-11 w-11 place-items-center rounded-full bg-leaf text-2xl text-white shadow-lg transition hover:bg-[#17372b]"
-          aria-label={`Agregar ${product.name} al carrito`}
+          onClick={addProduct}
+          className={`product-add-button ${added ? "is-added" : ""}`}
+          aria-label={
+            added ? `${product.name} agregado al carrito` : `Agregar ${product.name} al carrito`
+          }
         >
-          +
+          {added ? "Agregado!" : "+"}
         </button>
       )}
     </article>
@@ -210,7 +224,7 @@ function ProductSearch({ query, onQueryChange, products, onSelect }) {
  * Muestra el carrito lateral, sus controles de cantidad y el subtotal calculado.
  * @param {{open: boolean, onClose: () => void, cart: import("../models.js").CartLine[], products: import("../models.js").Product[], onChange: (id: string, delta: number) => void, onCheckout: () => void}} props
  */
-function CartDrawer({ open, onClose, cart, products, onChange, onCheckout }) {
+function CartDrawer({ open, onClose, cart, products, onChange, onSetQuantity, onCheckout }) {
   useBodyScrollLock(open);
   const items = cart
     .map((line) => ({ ...products.find((item) => item.id === line.id), quantity: line.quantity }))
@@ -287,7 +301,20 @@ function CartDrawer({ open, onClose, cart, products, onChange, onCheckout }) {
                       >
                         −
                       </button>
-                      <span className="min-w-7 text-center text-sm">{item.quantity}</span>
+                      <input
+                        className="cart-quantity-input"
+                        type="number"
+                        min="1"
+                        max={item.stock}
+                        value={item.quantity}
+                        onChange={(event) =>
+                          onSetQuantity(
+                            item.id,
+                            Math.min(item.stock, Math.max(1, Number(event.target.value) || 1))
+                          )
+                        }
+                        aria-label={`Cantidad de ${item.name}`}
+                      />
                       <button
                         className="h-7 w-8"
                         disabled={item.quantity >= item.stock}
@@ -840,12 +867,10 @@ export function Storefront() {
     );
   }, [catalog.products, query]);
 
-  // Seleccionar una sugerencia muestra su categoría y lleva al resultado filtrado.
+  // Seleccionar una sugerencia abre directamente la ficha del producto elegido.
   const selectSearchResult = (product) => {
-    setQuery(product.name);
-    setActiveCategory("Todos");
-    window.location.hash = "todos-productos";
-    document.getElementById("todos-productos")?.scrollIntoView({ behavior: "smooth" });
+    setQuery("");
+    window.location.hash = `producto/${encodeURIComponent(product.id)}`;
   };
 
   // Modifica una unidad del carrito, verifica inventario y persiste antes de actualizar la UI.
@@ -878,7 +903,42 @@ export function Storefront() {
       return;
     }
     setCart(updated);
-    if (difference > 0) notify(`${product.name} se agregó al carrito.`);
+  };
+
+  const setCartQuantity = (productId, quantity) => {
+    const product = catalog.products.find((item) => item.id === productId);
+    const nextQuantity = Math.min(product?.stock || 1, Math.max(1, Math.floor(quantity)));
+    const updated = cart.map((item) =>
+      item.id === productId ? { ...item, quantity: nextQuantity } : item
+    );
+    if (!saveCart(updated)) {
+      notify("No se pudo guardar el carrito.", "error");
+      return;
+    }
+    setCart(updated);
+  };
+
+  const addProductQuantity = (product, quantity) => {
+    const current = cart.find((item) => item.id === product.id)?.quantity || 0;
+    const requestedQuantity = Math.max(1, Math.floor(Number(quantity) || 1));
+    if (current + requestedQuantity > product.stock) {
+      notify(
+        `Existencias disponibles de ${product.name}: ${Math.max(0, product.stock - current)}.`,
+        "error"
+      );
+      return false;
+    }
+    const updated = current
+      ? cart.map((item) =>
+          item.id === product.id ? { ...item, quantity: current + requestedQuantity } : item
+        )
+      : [...cart, { id: product.id, quantity: requestedQuantity }];
+    if (!saveCart(updated)) {
+      notify("No se pudo guardar el carrito.", "error");
+      return false;
+    }
+    setCart(updated);
+    return true;
   };
 
   // Requiere una marca de sesión antes de abrir checkout; conserva el carrito local.
@@ -925,7 +985,20 @@ export function Storefront() {
                   onClick={() => setCartOpen(true)}
                   aria-label="Abrir carrito"
                 >
-                  ♧
+                  <svg
+                    className="h-5 w-5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="9" cy="20" r="1" />
+                    <circle cx="19" cy="20" r="1" />
+                    <path d="M3 4h2l2.4 9.4a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 2-1.6L20.5 7H6" />
+                  </svg>
                   <span className="absolute -right-1 -top-1 grid h-5 min-w-5 place-items-center rounded-full bg-leaf px-1 text-[.65rem] text-white">
                     {cart.reduce((sum, item) => sum + item.quantity, 0)}
                   </span>
@@ -996,7 +1069,7 @@ export function Storefront() {
               <ProductDetail
                 product={selectedProduct}
                 products={catalog.products}
-                onAdd={(item) => changeCart(item.id, 1)}
+                onAdd={(item, quantity) => addProductQuantity(item, quantity)}
               />
             ) : (
               <>
@@ -1218,6 +1291,7 @@ export function Storefront() {
         cart={cart}
         products={catalog.products}
         onChange={changeCart}
+        onSetQuantity={setCartQuantity}
         onCheckout={goCheckout}
       />
     </div>

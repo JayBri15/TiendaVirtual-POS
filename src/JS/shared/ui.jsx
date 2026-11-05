@@ -16,7 +16,10 @@ export function useNotice() {
     region: (
       <div className="notice-stack" role="status" aria-live="polite" aria-atomic="true">
         {notices.map((item) => (
-          <div key={item.id} className={`notice ${item.type === "error" ? "error" : ""}`}>
+          <div
+            key={item.id}
+            className={`notice ${item.type === "error" ? "notice-error" : "notice-success"}`}
+          >
             {item.message}
           </div>
         ))}

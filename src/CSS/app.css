@@ -58,26 +58,158 @@ button:disabled {
 .page-shell {
   min-height: 100vh;
 }
+.product-add-button {
+  position: absolute;
+  z-index: 20;
+  top: 0.75rem;
+  right: 0.75rem;
+  display: grid;
+  height: 2.75rem;
+  width: 2.75rem;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--leaf, #25483b);
+  color: white;
+  box-shadow: 0 10px 24px rgba(27, 41, 35, 0.2);
+  font-size: 1.5rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    width 0.35s ease,
+    border-radius 0.35s ease,
+    transform 0.35s ease,
+    background-color 0.2s ease;
+}
+.product-add-button:hover {
+  transform: scale(1.05);
+}
+.product-add-button.is-added {
+  width: 7rem;
+  border-radius: 999px;
+  background: #2ea044;
+  font-size: 0.875rem;
+  animation: added-button-shape 0.45s ease-out;
+}
+@keyframes added-button-shape {
+  0% {
+    transform: scaleX(0.72) scaleY(1.12);
+  }
+  55% {
+    transform: scaleX(1.08) scaleY(0.92);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.product-detail-add-button {
+  display: inline-grid;
+  min-width: 10rem;
+  height: 3rem;
+  place-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid #25483b;
+  padding: 0 1.25rem;
+  background: #25483b;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    min-width 0.35s ease,
+    padding 0.35s ease,
+    transform 0.35s ease,
+    background-color 0.2s ease;
+}
+.product-detail-add-button:not(:disabled):hover {
+  transform: translateY(-1px) scale(1.02);
+}
+.product-detail-add-button.is-added {
+  min-width: 8.5rem;
+  padding-inline: 1.75rem;
+  border-color: #2ea044;
+  background: #2ea044;
+  animation: added-button-shape 0.45s ease-out;
+}
+.product-detail-add-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.product-detail-counter {
+  display: inline-grid;
+  height: 3rem;
+  grid-template-columns: 3rem 3rem 3rem;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #d7d7cd;
+  border-radius: 999px;
+  background: white;
+  font-weight: 700;
+}
+.product-detail-counter button {
+  display: grid;
+  height: 100%;
+  width: 100%;
+  place-items: center;
+  font-size: 1.25rem;
+}
+.product-detail-counter button:not(:disabled):hover {
+  background: #eff2e7;
+}
+.product-detail-counter button:disabled {
+  cursor: not-allowed;
+  color: #b8bbb3;
+}
+.product-detail-quantity-input,
+.cart-quantity-input {
+  width: 3rem;
+  height: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  text-align: center;
+  font-weight: 700;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.product-detail-quantity-input::-webkit-inner-spin-button,
+.product-detail-quantity-input::-webkit-outer-spin-button,
+.cart-quantity-input::-webkit-inner-spin-button,
+.cart-quantity-input::-webkit-outer-spin-button {
+  margin: 0;
+  -webkit-appearance: none;
+}
 .notice-stack {
   position: fixed;
   z-index: 60;
-  right: 1.25rem;
-  bottom: 1.25rem;
+  left: 50%;
+  bottom: 1.5rem;
   display: grid;
   gap: 0.5rem;
+  transform: translateX(-50%);
 }
 .notice {
-  max-width: min(26rem, calc(100vw - 2.5rem));
-  padding: 0.85rem 1.1rem;
-  border: 1px solid #d7e1c4;
-  background: #fffefa;
-  color: #25483b;
+  min-width: min(22rem, calc(100vw - 2.5rem));
+  max-width: calc(100vw - 2.5rem);
+  padding: 0.95rem 1.6rem;
   box-shadow: 0 10px 30px #1b292326;
   animation: notice-in 0.2s ease-out;
+  border-radius: 999px;
+  text-align: center;
+  font-size: clamp(1rem, 2.5vw, 1.35rem);
+  font-weight: 700;
 }
-.notice.error {
-  border-color: #e1c8c1;
+.notice-success {
+  border: 1px solid #2ea044;
+  background: #2ea044;
+  color: white;
+}
+.notice-error {
+  border: 1px solid #e1c8c1;
+  background: #fffefa;
   color: #8d382b;
+  font-size: 0.95rem;
 }
 .input {
   width: 100%;

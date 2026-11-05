@@ -71,11 +71,6 @@ export function createApp({
   const app = express();
   const adminAuth = createAdminAuth(adminConfig);
   const customerAuth = createCustomerAuth(adminConfig?.sessionSecret);
-  const failedLogins = new Map();
-  const failedCustomerLogins = new Map();
-  const customerRegistrations = new Map();
-  const customerEmailActions = new Map();
-  const customerTokenActions = new Map();
 
   // Las imágenes se envían como JSON; se limita el tamaño de cada solicitud.
   app.use(express.json({ limit: "4mb" }));
@@ -102,8 +97,9 @@ export function createApp({
           "Configura SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM y PUBLIC_BASE_URL para crear cuentas.",
       });
     }
-    if (!allowLoginAttempt(request.ip, response, customerRegistrations)) return;
-    recordFailedLogin(request.ip, customerRegistrations);
+    if (!allowLoginAttempt(request.ip, response, catalogRepository, "customer-registration"))
+      return;
+    recordFailedLogin(request.ip, catalogRepository, "customer-registration");
 
     try {
       const { customer, password } = validateCustomerRegistration(
@@ -151,8 +147,8 @@ export function createApp({
         .status(503)
         .json({ error: "La autenticación de clientes no está configurada." });
     }
-    if (!allowLoginAttempt(request.ip, response, customerTokenActions)) return;
-    recordFailedLogin(request.ip, customerTokenActions);
+    if (!allowLoginAttempt(request.ip, response, catalogRepository, "customer-token")) return;
+    recordFailedLogin(request.ip, catalogRepository, "customer-token");
     const token = request.body?.token;
     if (!isAccountToken(token)) {
       return response.status(400).json({ error: "El enlace de verificación no es válido." });
@@ -185,8 +181,8 @@ export function createApp({
         .status(503)
         .json({ error: "El servicio de correo SMTP no está configurado." });
     }
-    if (!allowLoginAttempt(request.ip, response, customerEmailActions)) return;
-    recordFailedLogin(request.ip, customerEmailActions);
+    if (!allowLoginAttempt(request.ip, response, catalogRepository, "customer-email")) return;
+    recordFailedLogin(request.ip, catalogRepository, "customer-email");
     const email = request.body?.email;
     if (!isEmailAddress(email)) {
       return response.status(400).json({ error: "Ingresa un correo válido." });
@@ -232,8 +228,8 @@ export function createApp({
         .status(503)
         .json({ error: "El servicio de correo SMTP no está configurado." });
     }
-    if (!allowLoginAttempt(request.ip, response, customerEmailActions)) return;
-    recordFailedLogin(request.ip, customerEmailActions);
+    if (!allowLoginAttempt(request.ip, response, catalogRepository, "customer-email")) return;
+    recordFailedLogin(request.ip, catalogRepository, "customer-email");
     const email = request.body?.email;
     if (!isEmailAddress(email)) {
       return response.status(400).json({ error: "Ingresa un correo válido." });
@@ -274,8 +270,8 @@ export function createApp({
         .status(503)
         .json({ error: "La autenticación de clientes no está configurada." });
     }
-    if (!allowLoginAttempt(request.ip, response, customerTokenActions)) return;
-    recordFailedLogin(request.ip, customerTokenActions);
+    if (!allowLoginAttempt(request.ip, response, catalogRepository, "customer-token")) return;
+    recordFailedLogin(request.ip, catalogRepository, "customer-token");
     const token = request.body?.token;
     if (!isAccountToken(token)) {
       return response
@@ -322,7 +318,7 @@ export function createApp({
         .status(503)
         .json({ error: "La autenticación de clientes no está configurada." });
     }
-    if (!allowLoginAttempt(request.ip, response, failedCustomerLogins)) return;
+    if (!allowLoginAttempt(request.ip, response, catalogRepository, "customer-login")) return;
 
     const { email, password } = request.body || {};
     if (
@@ -337,7 +333,7 @@ export function createApp({
     try {
       const account = catalogRepository.getCustomerAccountByEmail(email.trim());
       if (!(await customerAuth.verifyPassword(password, account))) {
-        recordFailedLogin(request.ip, failedCustomerLogins);
+        recordFailedLogin(request.ip, catalogRepository, "customer-login");
         return response.status(401).json({ error: "El correo o la contraseña no son correctos." });
       }
       if (account.emailVerified !== 1) {
@@ -345,7 +341,7 @@ export function createApp({
           error: "Verifica tu correo antes de iniciar sesión. Puedes solicitar otro enlace.",
         });
       }
-      failedCustomerLogins.delete(request.ip);
+      catalogRepository.clearLoginAttempts("customer-login", request.ip);
       const customer = catalogRepository.getCustomerById(account.id);
       if (!customer) {
         return response.status(401).json({ error: "El correo o la contraseña no son correctos." });
@@ -493,7 +489,7 @@ export function createApp({
         error: "Configura ADMIN_EMAIL, ADMIN_PASSWORD y ADMIN_SESSION_SECRET en el servidor.",
       });
     }
-    if (!allowLoginAttempt(request.ip, response, failedLogins)) return;
+    if (!allowLoginAttempt(request.ip, response, catalogRepository, "admin-login")) return;
 
     const { email, password } = request.body || {};
     if (
@@ -507,11 +503,11 @@ export function createApp({
 
     try {
       if (!(await adminAuth.verifyCredentials(email, password))) {
-        recordFailedLogin(request.ip, failedLogins);
+        recordFailedLogin(request.ip, catalogRepository, "admin-login");
         return response.status(401).json({ error: "El correo o la contraseña no son correctos." });
       }
 
-      failedLogins.delete(request.ip);
+      catalogRepository.clearLoginAttempts("admin-login", request.ip);
       const token = adminAuth.createSessionToken();
       response.setHeader("Set-Cookie", serializeSessionCookie(token, secureCookies));
       return response.json({ authenticated: true });
@@ -786,15 +782,13 @@ function authorizeAdmin(request, response, adminAuth) {
  * Bloquea intentos repetidos durante quince minutos por dirección de cliente.
  * @param {string} ip Dirección determinada por Express.
  * @param {import("express").Response} response Respuesta HTTP actual.
- * @param {Map<string, {attempts: number, resetAt: number}>} attempts Intentos recientes.
+ * @param {ReturnType<typeof import("./catalogRepository.js").createCatalogRepository>} repository Repositorio SQLite.
+ * @param {string} scope Acción protegida.
  * @returns {boolean} Si se permite procesar el intento.
  */
-function allowLoginAttempt(ip, response, attempts) {
+function allowLoginAttempt(ip, response, repository, scope) {
   const now = Date.now();
-  for (const [address, attempt] of attempts) {
-    if (attempt.resetAt <= now) attempts.delete(address);
-  }
-  const attempt = attempts.get(ip);
+  const attempt = repository.getLoginAttempt(scope, ip);
   if (!attempt || attempt.attempts < maximumLoginAttempts) return true;
 
   response.setHeader("Retry-After", String(Math.ceil((attempt.resetAt - now) / 1000)));
@@ -805,17 +799,12 @@ function allowLoginAttempt(ip, response, attempts) {
 /**
  * Registra un fallo de acceso dentro de una ventana de quince minutos.
  * @param {string} ip Dirección determinada por Express.
- * @param {Map<string, {attempts: number, resetAt: number}>} attempts Intentos recientes.
+ * @param {ReturnType<typeof import("./catalogRepository.js").createCatalogRepository>} repository Repositorio SQLite.
+ * @param {string} scope Acción protegida.
  */
-function recordFailedLogin(ip, attempts) {
+function recordFailedLogin(ip, repository, scope) {
   const now = Date.now();
-  const current = attempts.get(ip);
-  if (current && current.resetAt > now) {
-    current.attempts += 1;
-    return;
-  }
-  if (attempts.size >= 1000) attempts.delete(attempts.keys().next().value);
-  attempts.set(ip, { attempts: 1, resetAt: now + loginWindowMilliseconds });
+  repository.recordLoginAttempt(scope, ip, now + loginWindowMilliseconds);
 }
 
 /** Genera un token secreto para el enlace y conserva solamente su hash en SQLite. */

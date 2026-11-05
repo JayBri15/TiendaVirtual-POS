@@ -89,7 +89,7 @@ El backend escucha en `http://localhost:3000`; Vite sirve el frontend y reenvía
 
 Los clientes pueden registrarse desde la tienda y verificar su dirección de correo. Los enlaces de verificación vencen en 24 horas y solo pueden utilizarse una vez. La recuperación de contraseña usa enlaces que vencen en una hora; al cambiar la contraseña, se revocan las sesiones existentes.
 
-Las contraseñas se almacenan con hashes salados mediante scrypt. El registro, los intentos fallidos de inicio de sesión y las solicitudes de correo tienen límites por dirección IP. Las sesiones de Admin y de clientes usan cookies HttpOnly y se invalidan al reiniciar el servidor. La autenticación de Admin está pensada para un solo administrador.
+Las contraseñas se almacenan con hashes salados mediante scrypt. El registro, los intentos fallidos de inicio de sesión y las solicitudes de correo tienen límites por dirección IP guardados en SQLite, por lo que continúan al reiniciar el backend. Las sesiones de Admin y de clientes usan cookies HttpOnly y se invalidan al reiniciar el servidor. La autenticación de Admin está pensada para un solo administrador.
 
 | Operación                                                      | Endpoint                                                                                  |
 | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |

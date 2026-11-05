@@ -101,6 +101,14 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS login_attempts (
+      scope TEXT NOT NULL,
+      ip TEXT NOT NULL,
+      attempts INTEGER NOT NULL CHECK (attempts >= 0),
+      reset_at INTEGER NOT NULL,
+      PRIMARY KEY (scope, ip)
+    );
+
     CREATE TABLE IF NOT EXISTS sales (
       id TEXT PRIMARY KEY,
       date TEXT NOT NULL,
@@ -178,6 +186,9 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
     verifyCustomerEmail: (tokenHash, now) => verifyCustomerEmail(database, tokenHash, now),
     resetCustomerPassword: (tokenHash, credentials, now) =>
       resetCustomerPassword(database, tokenHash, credentials, now),
+    getLoginAttempt: (scope, ip) => getLoginAttempt(database, scope, ip),
+    recordLoginAttempt: (scope, ip, resetAt) => recordLoginAttempt(database, scope, ip, resetAt),
+    clearLoginAttempts: (scope, ip) => clearLoginAttempts(database, scope, ip),
     createSale: (sale) => createSale(database, sale),
     voidSale: (saleId) => voidSale(database, saleId),
     createOrder: (customerId, order) => createOrder(database, customerId, order),
@@ -465,6 +476,42 @@ function isCustomerEmailVerified(database, customerId) {
     .prepare("SELECT email_verified FROM customer_credentials WHERE customer_id = ?")
     .get(customerId);
   return account?.email_verified === 1;
+}
+
+/** Lee el contador persistente de una acción, eliminando una ventana vencida. */
+function getLoginAttempt(database, scope, ip) {
+  const now = Date.now();
+  const attempt = database
+    .prepare("SELECT attempts, reset_at AS resetAt FROM login_attempts WHERE scope = ? AND ip = ?")
+    .get(scope, ip);
+  if (!attempt || attempt.resetAt > now) return attempt || null;
+  clearLoginAttempts(database, scope, ip);
+  return null;
+}
+
+/** Incrementa el contador persistente o inicia una nueva ventana de quince minutos. */
+function recordLoginAttempt(database, scope, ip, resetAt) {
+  const current = database
+    .prepare("SELECT attempts, reset_at AS resetAt FROM login_attempts WHERE scope = ? AND ip = ?")
+    .get(scope, ip);
+  if (current && current.resetAt > Date.now()) {
+    database
+      .prepare("UPDATE login_attempts SET attempts = attempts + 1 WHERE scope = ? AND ip = ?")
+      .run(scope, ip);
+    return;
+  }
+  database
+    .prepare(
+      `INSERT INTO login_attempts (scope, ip, attempts, reset_at)
+       VALUES (?, ?, 1, ?)
+       ON CONFLICT(scope, ip) DO UPDATE SET attempts = 1, reset_at = excluded.reset_at`
+    )
+    .run(scope, ip, resetAt);
+}
+
+/** Borra todos los intentos persistentes de una dirección para una acción. */
+function clearLoginAttempts(database, scope, ip) {
+  database.prepare("DELETE FROM login_attempts WHERE scope = ? AND ip = ?").run(scope, ip);
 }
 
 /**

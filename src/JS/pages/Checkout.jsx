@@ -147,6 +147,21 @@ export function Checkout() {
     setErrorMessage("");
   };
 
+  const setCartQuantity = (id, quantity) => {
+    const product = catalog.products.find((item) => item.id === id);
+    const nextQuantity = Math.min(product?.stock || 1, Math.max(1, Math.floor(quantity)));
+    const nextCart = cart.map((item) =>
+      item.id === id ? { ...item, quantity: nextQuantity } : item
+    );
+    if (!saveCart(nextCart)) {
+      notify("No se pudo guardar el cambio al carrito.", "error");
+      return;
+    }
+    setCart(nextCart);
+    setConfirmed(false);
+    setErrorMessage("");
+  };
+
   const createOrder = async (event) => {
     event.preventDefault();
     if (!customer || busy || items.length === 0) return;
@@ -372,7 +387,17 @@ export function Checkout() {
                                 >
                                   −
                                 </button>
-                                <span className="min-w-7 text-center text-sm">{item.quantity}</span>
+                                <input
+                                  className="cart-quantity-input"
+                                  type="number"
+                                  min="1"
+                                  max={item.stock}
+                                  value={item.quantity}
+                                  onChange={(event) =>
+                                    setCartQuantity(item.id, Number(event.target.value) || 1)
+                                  }
+                                  aria-label={`Cantidad de ${item.name}`}
+                                />
                                 <button
                                   className="h-7 w-8"
                                   disabled={item.quantity >= item.stock}

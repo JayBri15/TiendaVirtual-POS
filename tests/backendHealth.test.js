@@ -752,6 +752,7 @@ describe("API inicial", () => {
     );
     const { port } = limitedServer.address();
     const loginUrl = `http://127.0.0.1:${port}/api/admin/login`;
+    let initialServerStopped = false;
 
     try {
       for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -769,8 +770,25 @@ describe("API inicial", () => {
       });
       assert.equal(blockedResponse.status, 429);
       assert.ok(Number(blockedResponse.headers.get("retry-after")) > 0);
-    } finally {
+
       await close(limitedServer);
+      initialServerStopped = true;
+      const restartedServer = await listen(
+        createApp({ catalogRepository: repository, adminConfig: TEST_ADMIN_CONFIG })
+      );
+      const restartedPort = restartedServer.address().port;
+      try {
+        const restartedResponse = await fetch(`http://127.0.0.1:${restartedPort}/api/admin/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(TEST_ADMIN_CONFIG),
+        });
+        assert.equal(restartedResponse.status, 429);
+      } finally {
+        await close(restartedServer);
+      }
+    } finally {
+      if (!initialServerStopped) await close(limitedServer);
     }
   });
 
