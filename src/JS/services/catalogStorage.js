@@ -222,12 +222,21 @@ export function readCatalog() {
     });
     const categories = data.categories.map((category, index) =>
       typeof category === "string"
-        ? { name: category, sortOrder: index + 1, image: "", description: "" }
+        ? {
+            name: category,
+            sortOrder: index + 1,
+            image: DEFAULT_CATEGORIES.find((item) => item.name === category)?.image || "",
+            description: "",
+          }
         : {
             sortOrder: index + 1,
             image: "",
             description: "",
             ...category,
+            image:
+              category.image ||
+              DEFAULT_CATEGORIES.find((item) => item.name === category.name)?.image ||
+              "",
           }
     );
     return { products, categories };

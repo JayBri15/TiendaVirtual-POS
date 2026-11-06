@@ -224,6 +224,13 @@ function migrateCategoryColumns(database) {
   if (!columns.has("description")) {
     database.exec("ALTER TABLE categories ADD COLUMN description TEXT NOT NULL DEFAULT ''");
   }
+
+  const fillDefaultImage = database.prepare(
+    "UPDATE categories SET image = ? WHERE name = ? AND (image IS NULL OR image = '')"
+  );
+  for (const category of DEFAULT_CATEGORIES) {
+    fillDefaultImage.run(category.image, category.name);
+  }
 }
 
 /**

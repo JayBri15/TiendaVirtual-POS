@@ -1,3 +1,4 @@
+import { DEFAULT_CATEGORIES } from "../data/defaultCatalog.js";
 import { isValidCatalog } from "./catalogStorage.js";
 
 /**
@@ -17,5 +18,17 @@ export async function fetchPublicCatalog() {
   if (!isValidCatalog(catalog)) {
     throw new TypeError("El catálogo recibido no cumple el modelo esperado.");
   }
-  return catalog;
+  return {
+    ...catalog,
+    categories: catalog.categories.map((category, index) => {
+      const fallback = DEFAULT_CATEGORIES.find((item) => item.name === category.name);
+      return {
+        sortOrder: index + 1,
+        description: "",
+        ...fallback,
+        ...category,
+        image: category.image || fallback?.image || "",
+      };
+    }),
+  };
 }

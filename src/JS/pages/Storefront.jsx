@@ -1231,7 +1231,7 @@ export function Storefront() {
                               <img
                                 src={category.image}
                                 alt=""
-                                className="absolute inset-0 h-full w-full object-cover opacity-25 transition group-hover:scale-105"
+                                className="absolute inset-0 h-full w-full object-cover opacity-45 mix-blend-multiply transition duration-500 group-hover:scale-105"
                               />
                             )}
                             <span className="absolute inset-0 bg-gradient-to-t from-white/80 via-white/20 to-transparent" />

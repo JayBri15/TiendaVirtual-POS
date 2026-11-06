@@ -107,6 +107,15 @@ export const DEFAULT_CATEGORIES = [
 ].map((name, sortOrder) => ({
   name,
   sortOrder: sortOrder + 1,
-  image: "",
+  image: {
+    Nutrición:
+      "https://images.unsplash.com/photo-1611930022073-b7a4ba5fcccd?auto=format&fit=crop&w=900&q=80",
+    Belleza:
+      "https://images.unsplash.com/photo-1608248543803-ba4f8c70ae0b?auto=format&fit=crop&w=900&q=80",
+    "Cuidado personal":
+      "https://images.unsplash.com/photo-1608571423902-eed4a5ad8108?auto=format&fit=crop&w=900&q=80",
+    "En casa":
+      "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&w=900&q=80",
+  }[name],
   description: "",
 }));
