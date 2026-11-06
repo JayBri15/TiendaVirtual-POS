@@ -15,6 +15,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   // Reenvía las peticiones de la web al backend durante el desarrollo local.
   server: {
+    host: "0.0.0.0",
     proxy: {
       "/api": "http://localhost:3000",
     },

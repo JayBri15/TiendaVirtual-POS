@@ -3,6 +3,7 @@ import { CART_KEY, CATALOG_CHANGE_KEY, loadCart, saveCart } from "../services/ca
 import { fetchPublicCatalog } from "../services/catalogApi.js";
 import {
   loginCustomer,
+  logoutCustomer,
   readCustomerSession,
   registerCustomer,
   requestCustomerPasswordReset,
@@ -414,7 +415,9 @@ function AccountGate({ mode, onBack, onAuthenticated }) {
     }
     verificationRequest
       .then(() => {
-        if (active) setFlowState("verified");
+        if (active) {
+          setFlowState("verified");
+        }
       })
       .catch((error) => {
         if (active) {
@@ -448,8 +451,8 @@ function AccountGate({ mode, onBack, onAuthenticated }) {
         await resetCustomerPassword(token, password);
         setFlowState("reset-complete");
       } else {
-        await loginCustomer(email, password);
-        onAuthenticated();
+        const customer = await loginCustomer(email, password);
+        onAuthenticated(customer);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "No se pudo completar la solicitud.";
@@ -772,6 +775,7 @@ export function Storefront() {
   const [cartOpen, setCartOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(() => window.scrollY > 40);
   const [route, setRoute] = useState(window.location.hash.replace("#", ""));
+  const [customer, setCustomer] = useState(null);
   const { notify, region } = useNotice();
   const accountMode =
     ["iniciar-sesion", "crear-cuenta", "recuperar-contrasena"].includes(route) ||
@@ -834,6 +838,20 @@ export function Storefront() {
       window.removeEventListener("hashchange", syncRoute);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    let active = true;
+    readCustomerSession()
+      .then((currentCustomer) => {
+        if (active) setCustomer(currentCustomer);
+      })
+      .catch(() => {
+        if (active) setCustomer(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!isProduct) return;
@@ -941,15 +959,41 @@ export function Storefront() {
     return true;
   };
 
-  // Requiere una marca de sesión antes de abrir checkout; conserva el carrito local.
-  const goCheckout = () => {
+  // Comprueba la cookie de sesión antes de abrir checkout; conserva el carrito local.
+  const goCheckout = async () => {
     if (!cart.length) return;
     setCartOpen(false);
-    if (!sessionStorage.getItem("amway-customer-authenticated")) {
+    try {
+      const currentCustomer = await readCustomerSession();
+      if (!currentCustomer) throw new Error("La sesión expiró.");
+      setCustomer(currentCustomer);
+      window.location.href = "?page=checkout";
+    } catch {
       window.location.href = "./#iniciar-sesion";
-      return;
     }
-    window.location.href = "?page=checkout";
+  };
+
+  const authenticateCustomer = useCallback(async (currentCustomer) => {
+    if (currentCustomer) {
+      setCustomer(currentCustomer);
+    } else {
+      try {
+        setCustomer(await readCustomerSession());
+      } catch {
+        setCustomer(null);
+      }
+    }
+    window.location.hash = "inicio";
+  }, []);
+
+  const logout = async () => {
+    try {
+      await logoutCustomer();
+      setCustomer(null);
+      window.location.hash = "inicio";
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "No se pudo cerrar la sesión.", "error");
+    }
   };
 
   const accountScreen = accountMode;
@@ -973,13 +1017,28 @@ export function Storefront() {
                 />
               </div>
               <div className="flex shrink-0 items-center gap-2 sm:gap-5">
-                <a
-                  href="#iniciar-sesion"
-                  className="whitespace-nowrap text-xs font-semibold sm:text-sm"
-                >
-                  <span className="sm:hidden">Entrar</span>
-                  <span className="hidden sm:inline">Iniciar sesión</span>
-                </a>
+                {customer ? (
+                  <div className="flex items-center gap-2">
+                    <span className="hidden max-w-28 truncate text-sm font-semibold sm:inline">
+                      {customer.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={logout}
+                      className="whitespace-nowrap text-xs font-semibold underline underline-offset-4 sm:text-sm"
+                    >
+                      Cerrar sesión
+                    </button>
+                  </div>
+                ) : (
+                  <a
+                    href="#iniciar-sesion"
+                    className="whitespace-nowrap text-xs font-semibold sm:text-sm"
+                  >
+                    <span className="sm:hidden">Entrar</span>
+                    <span className="hidden sm:inline">Iniciar sesión</span>
+                  </a>
+                )}
                 <button
                   className="relative grid h-11 w-11 place-items-center rounded-full border border-line bg-white text-xl"
                   onClick={() => setCartOpen(true)}
@@ -1047,6 +1106,7 @@ export function Storefront() {
           onBack={() => {
             window.location.hash = "inicio";
           }}
+          onAuthenticated={authenticateCustomer}
         />
       ) : (
         <>

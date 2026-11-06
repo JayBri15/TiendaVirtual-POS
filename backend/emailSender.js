@@ -18,8 +18,10 @@ export function createEmailSender(
     config.PUBLIC_BASE_URL,
     (config.NODE_ENV || process.env.NODE_ENV) !== "production"
   );
+  const authConfigured = Boolean(user && password);
   const configured =
-    Boolean(host && user && password && from && baseUrl) &&
+    Boolean(host && from && baseUrl) &&
+    Boolean((user === "" && password === "") || authConfigured) &&
     Number.isSafeInteger(port) &&
     port > 0 &&
     port <= 65535;
@@ -29,7 +31,7 @@ export function createEmailSender(
         host,
         port,
         secure,
-        auth: { user, pass: password },
+        ...(authConfigured ? { auth: { user, pass: password } } : {}),
         requireTLS: !secure,
         tls: { minVersion: "TLSv1.2" },
         connectionTimeout: 10000,
@@ -40,6 +42,10 @@ export function createEmailSender(
 
   return {
     isConfigured: configured,
+    async verifyConnection() {
+      if (!transporter) throw new Error("El correo SMTP no está configurado.");
+      await transporter.verify();
+    },
     createAccountLink(route, token) {
       if (!configured || !baseUrl) throw new Error("El correo SMTP no está configurado.");
       return `${baseUrl}/#${route}/${encodeURIComponent(token)}`;
@@ -84,5 +90,14 @@ function readPublicBaseUrl(value, allowLocalHttp) {
 
 async function sendMessage(transporter, from, to, subject, text) {
   if (!transporter) throw new Error("El correo SMTP no está configurado.");
-  await transporter.sendMail({ from, to, subject, text });
+  const escapedLink = text.match(/https?:\/\/[^\s]+/)?.[0] || "";
+  const htmlText = text
+    .split("\n\n")
+    .map((paragraph) =>
+      paragraph === escapedLink
+        ? `<p><a href="${escapedLink}">${escapedLink}</a></p>`
+        : `<p>${paragraph.replaceAll("\n", "<br>")}</p>`
+    )
+    .join("");
+  await transporter.sendMail({ from, to, subject, text, html: `<div>${htmlText}</div>` });
 }

@@ -70,7 +70,9 @@ export function createApp({
 }) {
   const app = express();
   const adminAuth = createAdminAuth(adminConfig);
-  const customerAuth = createCustomerAuth(adminConfig?.sessionSecret);
+  const customerAuth = createCustomerAuth(
+    adminConfig?.sessionSecret ?? process.env.ADMIN_SESSION_SECRET
+  );
 
   // Las imágenes se envían como JSON; se limita el tamaño de cada solicitud.
   app.use(express.json({ limit: "4mb" }));

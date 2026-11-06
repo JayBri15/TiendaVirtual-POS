@@ -39,6 +39,8 @@ Tienda online con catálogo, checkout y panel de administración. La aplicación
    npm install
    ```
 
+   El servidor carga automáticamente las variables desde un archivo `.env` ubicado en la raíz del proyecto. Puedes copiar `.env.example`, rellenarlo y arrancar el backend con `npm run server`.
+
 2. Genera un secreto aleatorio para las sesiones:
 
    ```sh
@@ -70,6 +72,8 @@ El backend escucha en `http://localhost:3000`; Vite sirve el frontend y reenvía
 
 ## ⚙️ Configuración
 
+Copia `.env.example` como referencia. El backend también acepta las variables definidas por el entorno de ejecución o un archivo cargado por tu gestor de procesos.
+
 | Variable               | Descripción                                                                                                                           |
 | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | `ADMIN_EMAIL`          | Correo de la cuenta administradora.                                                                                                   |
@@ -81,6 +85,8 @@ El backend escucha en `http://localhost:3000`; Vite sirve el frontend y reenvía
 | `SMTP_PASSWORD`        | Contraseña o credencial SMTP dedicada.                                                                                                |
 | `SMTP_FROM`            | Remitente de los correos, por ejemplo `Amway <no-reply@tu-dominio.com>`.                                                              |
 | `PUBLIC_BASE_URL`      | Dirección pública usada para generar enlaces; en desarrollo se permite HTTP solo para `localhost`, y en producción se requiere HTTPS. |
+
+En GitHub Codespaces, si no defines `PUBLIC_BASE_URL`, el backend construirá automáticamente `https://<nombre-del-codespace>-5173.app.github.dev`. En el entorno remoto, el puerto 5173 debe tener visibilidad **Public** en el panel de puertos de VS Code.
 
 > [!CAUTION]
 > Configura estas variables únicamente en el entorno del servidor. No incluyas contraseñas ni secretos en el código, en el navegador ni en el repositorio. Sin la configuración de Admin, el acceso y las escrituras administrativas quedan deshabilitados. Sin SMTP, el registro y las solicitudes de correo no están disponibles.

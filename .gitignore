@@ -1,5 +1,9 @@
 node_modules/
 .vite/
+.env
+.env.*
+!.env.example
 backend/data/*.sqlite
 backend/data/*.sqlite-shm
 backend/data/*.sqlite-wal
+backend/data/customer-session-secret

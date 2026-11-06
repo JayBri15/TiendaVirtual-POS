@@ -44,7 +44,8 @@ describe("envío de correo SMTP", () => {
     assert.equal(messages[0].to, "customer@example.test");
     assert.match(messages[0].text, /válido por 24 horas/);
     assert.match(messages[1].text, /válido por 1 hora/);
-    assert.equal("html" in messages[0], false);
+    assert.match(messages[0].html, /<a href="https:\/\/store\.test\/verify"/);
+    assert.match(messages[1].html, /<a href="https:\/\/store\.test\/reset"/);
   });
 
   it("deshabilita el envío si faltan credenciales o la URL pública no es HTTPS", () => {
