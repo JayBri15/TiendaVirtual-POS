@@ -115,34 +115,6 @@ export async function deleteAdminProduct(productId) {
 }
 
 /**
- * Lee la lista pública de categorías del backend.
- * @returns {Promise<import("../models.js").Category[]>} Categorías públicas.
- */
-export async function readAdminCategories() {
-  const response = await fetch("/api/categories", {
-    cache: "no-store",
-    credentials: "same-origin",
-  });
-  if (!response.ok) throw new Error(await readAdminError(response));
-
-  const categories = await response.json();
-  if (
-    !Array.isArray(categories) ||
-    categories.some(
-      (category) =>
-        !category ||
-        typeof category.name !== "string" ||
-        !Number.isSafeInteger(category.sortOrder) ||
-        typeof category.image !== "string" ||
-        typeof category.description !== "string"
-    )
-  ) {
-    throw new TypeError("La respuesta de categorías no cumple el formato esperado.");
-  }
-  return categories;
-}
-
-/**
  * Crea una categoría persistida en SQLite desde Admin.
  * @param {import("../models.js").Category} category Registro nuevo.
  * @returns {Promise<import("../models.js").Category>} Registro confirmado por el servidor.

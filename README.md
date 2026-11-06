@@ -125,7 +125,7 @@ Las tarjetas del catálogo abren las fichas de producto mediante `#producto/<id>
 
 La primera ejecución crea `backend/data/store.sqlite` y carga datos de ejemplo si la tabla de productos está vacía. También añade automáticamente columnas nuevas a las tablas de categorías y credenciales de clientes de bases de datos anteriores.
 
-Los productos, las categorías y los datos privados de clientes, ventas y pedidos se almacenan en SQLite. El carrito y las secciones administrativas que aún son de demostración utilizan `localStorage`.
+Los productos, las categorías y los datos privados de clientes, ventas y pedidos se almacenan en SQLite. El carrito y el estado local utilizado para compatibilidad o migración de datos se guardan en `localStorage`. Las credenciales, los secretos y los datos operativos se mantienen fuera del navegador.
 
 ## 🗂️ Estructura del proyecto
 
@@ -152,10 +152,11 @@ Los productos, las categorías y los datos privados de clientes, ventas y pedido
 │   │   ├── main.jsx                  # Enrutamiento y montaje de React
 │   │   └── models.js                 # Contratos JSDoc de los datos
 │   └── index.html                    # Documento de entrada
-└── docs/                             # Salida generada para publicación estática
+├── tests/                            # Pruebas unitarias e integración HTTP
+└── docs/                             # Salida compilada para publicación estática
 ```
 
-Los productos se relacionan con categorías por nombre; el carrito conserva `id` y `quantity`, y las ventas guardan instantáneas para proteger el historial frente a ediciones posteriores. No edites manualmente los archivos generados en `docs/`.
+Los productos se relacionan con categorías por nombre; el carrito conserva `id` y `quantity`, y las ventas y pedidos guardan instantáneas para proteger el historial frente a ediciones posteriores. No edites manualmente los archivos generados en `docs/`.
 
 ## ✅ Pruebas y formato
 
@@ -164,6 +165,8 @@ npm test
 npm run format
 npm run format:check
 ```
+
+La suite cubre las APIs HTTP, autenticación, validación, persistencia SQLite, correo, catálogo, carrito y fichas de producto. El código debe mantener 42 pruebas aprobadas como referencia mínima antes de publicar cambios.
 
 ## 📦 Compilación y producción
 

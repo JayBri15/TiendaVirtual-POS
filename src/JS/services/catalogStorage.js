@@ -225,7 +225,7 @@ export function readCatalog() {
         ? {
             name: category,
             sortOrder: index + 1,
-            image: DEFAULT_CATEGORIES.find((item) => item.name === category)?.image || "",
+            image: "",
             description: "",
           }
         : {

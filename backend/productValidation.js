@@ -63,25 +63,6 @@ export function validateCategoryRename(currentName, value, catalog) {
 }
 
 /**
- * Comprueba que una categoría exista y que no tenga productos asociados.
- * @param {string} categoryName Nombre de la categoría a borrar.
- * @param {import("../src/JS/models.js").Catalog} catalog Catálogo actual.
- * @returns {string} Nombre validado.
- */
-export function validateCategoryDelete(categoryName, catalog) {
-  const name = requiredText(categoryName, "La categoría", 60);
-  if (!catalog.categories.some((category) => category.name === name)) {
-    throw new CategoryValidationError("La categoría no existe.");
-  }
-  if (catalog.products.some((product) => product.category === name)) {
-    throw new CategoryValidationError(
-      "No se puede eliminar una categoría que tiene productos asignados."
-    );
-  }
-  return name;
-}
-
-/**
  * Comprueba el contrato completo de una categoría configurable desde Admin.
  * @param {unknown} value Cuerpo JSON recibido.
  * @returns {import("../src/JS/models.js").Category} Categoría normalizada.
