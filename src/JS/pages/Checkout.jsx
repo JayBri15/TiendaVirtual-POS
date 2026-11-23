@@ -1,7 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { CART_KEY, CATALOG_CHANGE_KEY, loadCart, saveCart } from "../services/catalogStorage.js";
 import { fetchPublicCatalog } from "../services/catalogApi.js";
-import { createCustomerOrder, readCustomerSession } from "../services/customerApi.js";
+import {
+  createCustomerOrder,
+  readCustomerAddresses,
+  readCustomerSession,
+} from "../services/customerApi.js";
+import { getProvinceMunicipalities, PROVINCES } from "dominican-republic-geodata";
+import { EPS_LOCATIONS } from "../../../shared/epsLocations.js";
 import { money } from "../shared/format.js";
 import { Brand, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
@@ -10,6 +16,8 @@ const emptyAddress = {
   street: "",
   city: "",
   region: "",
+  municipality: "",
+  sector: "",
   postalCode: "",
   phone: "",
 };
@@ -58,6 +66,10 @@ export function Checkout() {
   const [cart, setCart] = useState([]);
   const [customerStatus, setCustomerStatus] = useState("checking");
   const [customer, setCustomer] = useState(null);
+  const [customerAddresses, setCustomerAddresses] = useState({ primary: null, alternate: null });
+  const [addressChoice, setAddressChoice] = useState("primary");
+  const [epsLocationId, setEpsLocationId] = useState("");
+  const [saveAlternateAddress, setSaveAlternateAddress] = useState(true);
   const [step, setStep] = useState("review");
   const [confirmed, setConfirmed] = useState(false);
   const [address, setAddress] = useState(emptyAddress);
@@ -77,6 +89,11 @@ export function Checkout() {
     [cart, catalog.products]
   );
   const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const municipalities = useMemo(() => {
+    const province = PROVINCES.find((item) => item.name === address.region);
+    return province ? getProvinceMunicipalities(province.id) : [];
+  }, [address.region]);
+  const selectedEpsLocation = EPS_LOCATIONS.find((location) => location.id === epsLocationId);
 
   const refreshCatalog = useCallback(async () => {
     setCatalogStatus("loading");
@@ -96,13 +113,20 @@ export function Checkout() {
     setCustomerStatus("checking");
     try {
       const profile = await readCustomerSession();
+      const savedAddresses = profile
+        ? await readCustomerAddresses()
+        : { primary: null, alternate: null };
       setCustomer(profile);
+      setCustomerAddresses(savedAddresses);
+      setAddressChoice(savedAddresses.primary ? "primary" : "alternate");
       setCustomerStatus(profile ? "authenticated" : "unauthenticated");
       if (profile) {
+        const primaryAddress = savedAddresses.primary;
         setAddress((current) => ({
-          ...current,
-          name: current.name || profile.name,
-          phone: current.phone || profile.phone,
+          ...emptyAddress,
+          ...(primaryAddress || current),
+          name: current.name || primaryAddress?.name || profile.name,
+          phone: current.phone || primaryAddress?.phone || profile.phone,
         }));
       }
     } catch (error) {
@@ -168,10 +192,25 @@ export function Checkout() {
     setBusy(true);
     setErrorMessage("");
     try {
+      const isEpsPickup = addressChoice === "eps";
       const savedOrder = await createCustomerOrder({
-        address,
+        address: isEpsPickup ? { name: address.name, phone: address.phone } : address,
+        deliveryMethod: isEpsPickup ? "eps" : "address",
+        ...(isEpsPickup ? { epsLocationId } : {}),
+        saveAsAlternate:
+          Boolean(customerAddresses.primary) &&
+          !isEpsPickup &&
+          addressChoice === "alternate" &&
+          saveAlternateAddress,
         items: items.map(({ id, quantity }) => ({ productId: id, quantity })),
       });
+      if (!isEpsPickup) {
+        if (!customerAddresses.primary) {
+          setCustomerAddresses((current) => ({ ...current, primary: { ...address } }));
+        } else if (addressChoice === "alternate" && saveAlternateAddress) {
+          setCustomerAddresses((current) => ({ ...current, alternate: { ...address } }));
+        }
+      }
       if (!saveCart([])) {
         notify("El pedido se guardó, pero no se pudo vaciar el carrito local.", "error");
       }
@@ -292,6 +331,21 @@ export function Checkout() {
               confirmación. El equipo revisará existencias antes de confirmarlo. Todavía no se
               realizó ningún cobro y el inventario no se ha descontado.
             </p>
+            {order.shippingAddress.deliveryMethod === "eps" && (
+              <div className="mt-5 rounded bg-paper p-4 text-left text-sm">
+                <strong className="block">Retiro en sucursal EPS</strong>
+                <span className="mt-1 block">
+                  {order.shippingAddress.epsLocation.name} —{" "}
+                  {[
+                    order.shippingAddress.epsLocation.address,
+                    order.shippingAddress.epsLocation.city,
+                    order.shippingAddress.epsLocation.region,
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                </span>
+              </div>
+            )}
             <div className="mt-6 flex justify-center gap-8 text-sm">
               <span>{order.items.reduce((count, item) => count + item.quantity, 0)} artículos</span>
               <strong>{money(order.total)}</strong>
@@ -445,43 +499,257 @@ export function Checkout() {
                 {step === "address" && (
                   <div className="grid gap-5 lg:grid-cols-[1fr_20rem]">
                     <form className="card p-5 sm:p-7" onSubmit={createOrder}>
-                      <h2 className="font-display text-2xl">Dirección de entrega</h2>
+                      <h2 className="font-display text-2xl">Opciones de entrega</h2>
                       <p className="mt-2 text-sm text-muted">
                         Recibirás un pedido pendiente. No se te cobrará en este paso.
                       </p>
-                      <div className="mt-5 grid gap-4 sm:grid-cols-2">
-                        {[
-                          ["name", "Nombre completo", "text", "name", 120],
-                          ["street", "Calle y número", "text", "street-address", 200],
-                          ["city", "Ciudad", "text", "address-level2", 100],
-                          ["region", "Estado o provincia", "text", "address-level1", 100],
-                          ["postalCode", "Código postal", "text", "postal-code", 20],
-                          ["phone", "Teléfono de contacto", "tel", "tel", 40],
-                        ].map(([field, label, type, autoComplete, maxLength]) => (
+                      <fieldset className="mt-5 grid gap-3 sm:grid-cols-2">
+                        <legend className="label">Ubicación de entrega</legend>
+                        {customerAddresses.primary && (
                           <label
-                            key={field}
-                            className={
-                              field === "name" || field === "street" ? "sm:col-span-2" : ""
-                            }
+                            className={`flex cursor-pointer items-start gap-3 rounded border p-4 ${
+                              addressChoice === "primary"
+                                ? "border-leaf bg-[#eff2e7]"
+                                : "border-line"
+                            }`}
                           >
-                            <span className="label">{label}</span>
                             <input
-                              className="input"
-                              type={type}
-                              autoComplete={autoComplete}
-                              value={address[field]}
-                              maxLength={maxLength}
-                              required
-                              onChange={(event) =>
-                                setAddress((current) => ({
-                                  ...current,
-                                  [field]: event.target.value,
-                                }))
-                              }
+                              type="radio"
+                              name="addressChoice"
+                              value="primary"
+                              checked={addressChoice === "primary"}
+                              onChange={() => {
+                                setAddressChoice("primary");
+                                setSaveAlternateAddress(Boolean(customerAddresses.alternate));
+                                setAddress(customerAddresses.primary);
+                              }}
                             />
+                            <span className="text-sm">
+                              <strong className="block">Dirección predeterminada</strong>
+                              <span className="mt-1 block text-muted">
+                                {[
+                                  customerAddresses.primary.street,
+                                  customerAddresses.primary.sector,
+                                  customerAddresses.primary.municipality,
+                                  customerAddresses.primary.city,
+                                  customerAddresses.primary.region,
+                                ]
+                                  .filter(Boolean)
+                                  .join(", ")}
+                              </span>
+                            </span>
                           </label>
-                        ))}
-                      </div>
+                        )}
+                        <label
+                          className={`flex cursor-pointer items-start gap-3 rounded border p-4 ${
+                            addressChoice === "eps" ? "border-leaf bg-[#eff2e7]" : "border-line"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="addressChoice"
+                            value="eps"
+                            checked={addressChoice === "eps"}
+                            onChange={() => {
+                              setAddressChoice("eps");
+                              setAddress((current) => ({
+                                ...current,
+                                name: current.name || customer.name,
+                                phone: current.phone || customer.phone,
+                              }));
+                            }}
+                          />
+                          <span className="text-sm">
+                            <strong className="block">Retirar en sucursal EPS</strong>
+                            <span className="mt-1 block text-muted">
+                              Elige una ubicación disponible en República Dominicana.
+                            </span>
+                          </span>
+                        </label>
+                        <button
+                          className={`inline-flex min-h-12 items-center gap-2 self-start rounded-full border px-5 py-3 text-sm font-semibold transition-colors ${
+                            addressChoice === "alternate"
+                              ? "border-leaf bg-[#eff2e7] text-leaf"
+                              : "border-line bg-white text-ink hover:border-leaf"
+                          }`}
+                          type="button"
+                          aria-pressed={addressChoice === "alternate"}
+                          onClick={() => {
+                            setAddressChoice("alternate");
+                            setAddress(
+                              customerAddresses.alternate || {
+                                ...emptyAddress,
+                                name: customer.name,
+                                phone: customer.phone,
+                              }
+                            );
+                          }}
+                        >
+                          <span aria-hidden="true" className="text-lg leading-none">
+                            +
+                          </span>
+                          Otra dirección
+                        </button>
+                      </fieldset>
+                      {addressChoice === "eps" && (
+                        <div className="mt-5">
+                          <label className="label" htmlFor="checkout-eps-location">
+                            Sucursal EPS
+                          </label>
+                          <select
+                            id="checkout-eps-location"
+                            className="input"
+                            value={epsLocationId}
+                            required
+                            onChange={(event) => setEpsLocationId(event.target.value)}
+                          >
+                            <option value="">Selecciona una sucursal</option>
+                            {EPS_LOCATIONS.map((location) => (
+                              <option key={location.id} value={location.id}>
+                                {location.name} — {location.city}, {location.region}
+                              </option>
+                            ))}
+                          </select>
+                          {selectedEpsLocation && (
+                            <p className="mt-2 text-sm text-muted">{selectedEpsLocation.address}</p>
+                          )}
+                        </div>
+                      )}
+                      {(addressChoice === "alternate" ||
+                        (!customerAddresses.primary && addressChoice !== "eps")) && (
+                        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                          {[
+                            ["name", "Nombre completo", "text", "name", 120],
+                            ["street", "Calle y número", "text", "street-address", 200],
+                            ["region", "Provincia/Estado", "select", "address-level1", 100],
+                            ["municipality", "Municipio", "select", "", 100],
+                            ["city", "Ciudad", "text", "address-level2", 100],
+                            ["sector", "Sector", "text", "", 100],
+                            ["postalCode", "Código postal", "text", "postal-code", 20],
+                            ["phone", "Teléfono de contacto", "tel", "tel", 40],
+                          ].map(([field, label, type, autoComplete, maxLength]) => (
+                            <div
+                              key={field}
+                              className={
+                                field === "name" || field === "street" ? "sm:col-span-2" : ""
+                              }
+                            >
+                              <label className="label" htmlFor={`checkout-${field}`}>
+                                {label}
+                              </label>
+                              {field === "region" ? (
+                                <select
+                                  id="checkout-region"
+                                  className="input"
+                                  autoComplete="address-level1"
+                                  value={address.region}
+                                  required
+                                  onChange={(event) =>
+                                    setAddress((current) => ({
+                                      ...current,
+                                      region: event.target.value,
+                                      municipality: "",
+                                    }))
+                                  }
+                                >
+                                  <option value="">Selecciona una provincia</option>
+                                  {PROVINCES.toSorted((a, b) =>
+                                    a.name.localeCompare(b.name, "es")
+                                  ).map((province) => (
+                                    <option key={province.id} value={province.name}>
+                                      {province.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : field === "municipality" ? (
+                                <select
+                                  id="checkout-municipality"
+                                  className="input"
+                                  value={address.municipality}
+                                  required
+                                  disabled={!address.region}
+                                  onChange={(event) =>
+                                    setAddress((current) => ({
+                                      ...current,
+                                      municipality: event.target.value,
+                                    }))
+                                  }
+                                >
+                                  <option value="">
+                                    {address.region
+                                      ? "Selecciona un municipio"
+                                      : "Primero selecciona una provincia"}
+                                  </option>
+                                  {municipalities.map((municipality) => (
+                                    <option key={municipality.id} value={municipality.name}>
+                                      {municipality.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <input
+                                  id={`checkout-${field}`}
+                                  className="input"
+                                  type={type}
+                                  autoComplete={autoComplete || undefined}
+                                  value={address[field]}
+                                  maxLength={maxLength}
+                                  required
+                                  onChange={(event) =>
+                                    setAddress((current) => ({
+                                      ...current,
+                                      [field]: event.target.value,
+                                    }))
+                                  }
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {addressChoice === "eps" && (
+                        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                          {[
+                            ["name", "Nombre completo", "text", "name", 120],
+                            ["phone", "Teléfono de contacto", "tel", "tel", 40],
+                          ].map(([field, label, type, autoComplete, maxLength]) => (
+                            <div key={field}>
+                              <label className="label" htmlFor={`checkout-${field}`}>
+                                {label}
+                              </label>
+                              <input
+                                id={`checkout-${field}`}
+                                className="input"
+                                type={type}
+                                autoComplete={autoComplete || undefined}
+                                value={address[field]}
+                                maxLength={maxLength}
+                                required
+                                onChange={(event) =>
+                                  setAddress((current) => ({
+                                    ...current,
+                                    [field]: event.target.value,
+                                  }))
+                                }
+                              />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {customerAddresses.primary && addressChoice === "alternate" && (
+                        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded bg-paper p-4 text-sm">
+                          <input
+                            className="mt-1 accent-[#25483b]"
+                            type="checkbox"
+                            checked={saveAlternateAddress}
+                            onChange={(event) => setSaveAlternateAddress(event.target.checked)}
+                          />
+                          <span>
+                            Guardar esta ubicación aparte de la dirección predeterminada para
+                            futuras compras.
+                          </span>
+                        </label>
+                      )}
                       {errorMessage && (
                         <p className="mt-4 text-sm text-[#9d5144]" role="alert">
                           {errorMessage}

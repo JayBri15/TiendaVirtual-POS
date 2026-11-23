@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../backend/app.js";
 import { createCatalogRepository } from "../backend/catalogRepository.js";
+import { EPS_LOCATIONS } from "../shared/epsLocations.js";
 
 const TEST_ADMIN_CONFIG = {
   email: "owner@example.test",
@@ -204,6 +205,31 @@ describe("API inicial", () => {
           );
           INSERT INTO customer_credentials (customer_id, salt, password_hash)
           VALUES ('legacy-customer', 'c2FsdA', 'aGFzaA');
+          CREATE TABLE orders (
+            id TEXT PRIMARY KEY,
+            date TEXT NOT NULL,
+            customer_id TEXT,
+            customer_name TEXT NOT NULL,
+            recipient_name TEXT NOT NULL,
+            street TEXT NOT NULL,
+            city TEXT NOT NULL,
+            region TEXT NOT NULL,
+            postal_code TEXT NOT NULL,
+            phone TEXT NOT NULL,
+            total REAL NOT NULL,
+            status TEXT NOT NULL,
+            stock_deducted INTEGER NOT NULL DEFAULT 0,
+            confirmed_at TEXT,
+            cancelled_at TEXT
+          );
+          INSERT INTO orders (
+            id, date, customer_name, recipient_name, street, city, region, postal_code,
+            phone, total, status
+          ) VALUES (
+            'legacy-order', '2026-01-01T00:00:00.000Z', 'Cliente anterior',
+            'Cliente anterior', 'Calle anterior', 'Ciudad', 'Provincia',
+            '00000', '555-0100', 10, 'pending'
+          );
         `);
         legacyDatabase.close();
         legacyDatabase = null;
@@ -220,6 +246,16 @@ describe("API inicial", () => {
         ]);
         assert.equal(catalog.products[0].id, "legacy-product");
         assert.equal(repository.getCustomerAccountByEmail("old@example.test").emailVerified, 0);
+        assert.deepEqual(repository.getOrders()[0].shippingAddress, {
+          name: "Cliente anterior",
+          street: "Calle anterior",
+          city: "Ciudad",
+          region: "Provincia",
+          municipality: "",
+          sector: "",
+          postalCode: "00000",
+          phone: "555-0100",
+        });
       } finally {
         legacyDatabase?.close();
         repository?.close();
@@ -369,6 +405,8 @@ describe("API inicial", () => {
       headers: { Cookie: customerCookie },
     });
     assert.deepEqual(await sessionResponse.json(), { authenticated: true, customer });
+    const unauthenticatedAddresses = await fetch(`${apiUrl}/api/account/addresses`);
+    assert.equal(unauthenticatedAddresses.status, 401);
 
     const weakPasswordResponse = await fetch(`${apiUrl}/api/account/register`, {
       method: "POST",
@@ -410,6 +448,8 @@ describe("API inicial", () => {
       street: "123 Calle Principal",
       city: "Ciudad",
       region: "Estado",
+      municipality: "Municipio",
+      sector: "Sector",
       postalCode: "12345",
       phone: credentials.phone,
     };
@@ -424,6 +464,79 @@ describe("API inicial", () => {
     assert.equal(createOrderResponse.status, 201);
     const order = await createOrderResponse.json();
     assert.equal(order.status, "pending");
+    assert.deepEqual(order.shippingAddress, address);
+    assert.deepEqual(repository.getCustomerAddresses(customer.id), {
+      primary: address,
+      alternate: null,
+    });
+    const savedAddressesResponse = await fetch(`${apiUrl}/api/account/addresses`, {
+      headers: { Cookie: customerCookie },
+    });
+    assert.deepEqual(await savedAddressesResponse.json(), {
+      primary: address,
+      alternate: null,
+    });
+
+    const alternateAddress = { ...address, street: "Otra calle", sector: "Otro sector" };
+    const alternateOrderResponse = await fetch(`${apiUrl}/api/orders`, {
+      method: "POST",
+      headers: { Cookie: customerCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        address: alternateAddress,
+        saveAsAlternate: true,
+        items: [{ productId: product.id, quantity: 1 }],
+      }),
+    });
+    assert.equal(alternateOrderResponse.status, 201);
+    assert.deepEqual(repository.getCustomerAddresses(customer.id), {
+      primary: address,
+      alternate: alternateAddress,
+    });
+    const epsLocation = EPS_LOCATIONS.find((location) => location.name === "Naco");
+    const epsOrderResponse = await fetch(`${apiUrl}/api/orders`, {
+      method: "POST",
+      headers: { Cookie: customerCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deliveryMethod: "eps",
+        epsLocationId: epsLocation.id,
+        address: { name: credentials.name, phone: credentials.phone },
+        saveAsAlternate: true,
+        items: [{ productId: product.id, quantity: 1 }],
+      }),
+    });
+    assert.equal(epsOrderResponse.status, 201);
+    const epsOrder = await epsOrderResponse.json();
+    assert.deepEqual(epsOrder.shippingAddress, {
+      name: credentials.name,
+      street: epsLocation.address,
+      city: epsLocation.city,
+      region: epsLocation.region,
+      municipality: "",
+      sector: "",
+      postalCode: "",
+      phone: credentials.phone,
+      deliveryMethod: "eps",
+      epsLocation,
+    });
+    assert.deepEqual(
+      repository.getOrders().find((savedOrder) => savedOrder.id === epsOrder.id).shippingAddress,
+      epsOrder.shippingAddress
+    );
+    assert.deepEqual(repository.getCustomerAddresses(customer.id), {
+      primary: address,
+      alternate: alternateAddress,
+    });
+    const invalidEpsLocationResponse = await fetch(`${apiUrl}/api/orders`, {
+      method: "POST",
+      headers: { Cookie: customerCookie, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        deliveryMethod: "eps",
+        epsLocationId: "unknown-location",
+        address: { name: credentials.name, phone: credentials.phone },
+        items: [{ productId: product.id, quantity: 1 }],
+      }),
+    });
+    assert.equal(invalidEpsLocationResponse.status, 400);
     assert.equal(order.total, product.price * 2);
     assert.equal(order.items[0].unitPrice, product.price);
     assert.equal(repository.getCatalog().products[0].stock, product.stock);

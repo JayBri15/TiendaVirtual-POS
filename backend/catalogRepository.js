@@ -101,6 +101,20 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS customer_addresses (
+      customer_id TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+      address_type TEXT NOT NULL CHECK (address_type IN ('primary', 'alternate')),
+      recipient_name TEXT NOT NULL,
+      street TEXT NOT NULL,
+      city TEXT NOT NULL,
+      region TEXT NOT NULL,
+      municipality TEXT NOT NULL,
+      sector TEXT NOT NULL,
+      postal_code TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      PRIMARY KEY (customer_id, address_type)
+    );
+
     CREATE TABLE IF NOT EXISTS login_attempts (
       scope TEXT NOT NULL,
       ip TEXT NOT NULL,
@@ -139,8 +153,13 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
       street TEXT NOT NULL,
       city TEXT NOT NULL,
       region TEXT NOT NULL,
+      municipality TEXT NOT NULL DEFAULT '',
+      sector TEXT NOT NULL DEFAULT '',
       postal_code TEXT NOT NULL,
       phone TEXT NOT NULL,
+      delivery_method TEXT NOT NULL DEFAULT 'address',
+      eps_location_id TEXT NOT NULL DEFAULT '',
+      eps_location_name TEXT NOT NULL DEFAULT '',
       total REAL NOT NULL CHECK (total >= 0),
       status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'cancelled')),
       stock_deducted INTEGER NOT NULL DEFAULT 0 CHECK (stock_deducted IN (0, 1)),
@@ -161,6 +180,7 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
 
   migrateCategoryColumns(database);
   migrateCustomerCredentialColumns(database);
+  migrateOrderAddressColumns(database);
   const productCount = database.prepare("SELECT COUNT(*) AS count FROM products").get().count;
   if (productCount === 0) seedCatalog(database);
 
@@ -192,6 +212,7 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
     createSale: (sale) => createSale(database, sale),
     voidSale: (saleId) => voidSale(database, saleId),
     createOrder: (customerId, order) => createOrder(database, customerId, order),
+    getCustomerAddresses: (customerId) => getCustomerAddresses(database, customerId),
     getOrders: () => readOrders(database),
     confirmOrder: (orderId) => confirmOrder(database, orderId),
     cancelOrder: (orderId) => cancelOrder(database, orderId),
@@ -247,6 +268,33 @@ function migrateCustomerCredentialColumns(database) {
     database.exec(
       "ALTER TABLE customer_credentials ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0 CHECK (email_verified IN (0, 1))"
     );
+  }
+}
+
+/**
+ * Añade columnas de entrega a pedidos anteriores sin perder sus registros.
+ */
+function migrateOrderAddressColumns(database) {
+  const columns = new Set(
+    database
+      .prepare("PRAGMA table_info(orders)")
+      .all()
+      .map((column) => column.name)
+  );
+  if (!columns.has("municipality")) {
+    database.exec("ALTER TABLE orders ADD COLUMN municipality TEXT NOT NULL DEFAULT ''");
+  }
+  if (!columns.has("sector")) {
+    database.exec("ALTER TABLE orders ADD COLUMN sector TEXT NOT NULL DEFAULT ''");
+  }
+  if (!columns.has("delivery_method")) {
+    database.exec("ALTER TABLE orders ADD COLUMN delivery_method TEXT NOT NULL DEFAULT 'address'");
+  }
+  if (!columns.has("eps_location_id")) {
+    database.exec("ALTER TABLE orders ADD COLUMN eps_location_id TEXT NOT NULL DEFAULT ''");
+  }
+  if (!columns.has("eps_location_name")) {
+    database.exec("ALTER TABLE orders ADD COLUMN eps_location_name TEXT NOT NULL DEFAULT ''");
   }
 }
 
@@ -802,7 +850,7 @@ function hasActiveFulfillmentForProduct(database, productId) {
  * Registra un pedido pendiente con precios y nombres actuales, sin reservar stock.
  * @param {import("node:sqlite").DatabaseSync} database Conexión SQLite abierta.
  * @param {string} customerId Cuenta que inició sesión.
- * @param {{address: object, items: Array<{productId: string, quantity: number}>}} request Solicitud validada.
+ * @param {{address: object, deliveryMethod: string, epsLocation: object|null, items: Array<{productId: string, quantity: number}>}} request Solicitud validada.
  */
 function createOrder(database, customerId, request) {
   database.exec("BEGIN");
@@ -850,12 +898,20 @@ function createOrder(database, customerId, request) {
       total,
       status: "pending",
     };
+    const savedAddresses = getCustomerAddresses(database, customerId);
+    if (request.deliveryMethod === "address" && !savedAddresses.primary) {
+      saveCustomerAddress(database, customerId, "primary", request.address);
+    }
+    if (request.deliveryMethod === "address" && request.saveAsAlternate) {
+      saveCustomerAddress(database, customerId, "alternate", request.address);
+    }
     database
       .prepare(
         `INSERT INTO orders (
            id, date, customer_id, customer_name, recipient_name, street, city, region,
-           postal_code, phone, total, status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           municipality, sector, postal_code, phone, delivery_method, eps_location_id,
+           eps_location_name, total, status
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         order.id,
@@ -866,8 +922,13 @@ function createOrder(database, customerId, request) {
         order.shippingAddress.street,
         order.shippingAddress.city,
         order.shippingAddress.region,
+        order.shippingAddress.municipality,
+        order.shippingAddress.sector,
         order.shippingAddress.postalCode,
         order.shippingAddress.phone,
+        request.deliveryMethod,
+        request.epsLocation?.id || "",
+        request.epsLocation?.name || "",
         order.total,
         order.status
       );
@@ -976,13 +1037,67 @@ function cancelOrder(database, orderId) {
   }
 }
 
+function getCustomerAddresses(database, customerId) {
+  const rows = database
+    .prepare(
+      `SELECT address_type AS type, recipient_name AS name, street, city, region, municipality,
+              sector, postal_code AS postalCode, phone
+       FROM customer_addresses WHERE customer_id = ?`
+    )
+    .all(customerId);
+  return {
+    primary: rows.find((address) => address.type === "primary")
+      ? withoutAddressType(rows.find((address) => address.type === "primary"))
+      : null,
+    alternate: rows.find((address) => address.type === "alternate")
+      ? withoutAddressType(rows.find((address) => address.type === "alternate"))
+      : null,
+  };
+}
+
+function withoutAddressType({ type: _type, ...address }) {
+  return address;
+}
+
+function saveCustomerAddress(database, customerId, type, address) {
+  database
+    .prepare(
+      `INSERT INTO customer_addresses (
+         customer_id, address_type, recipient_name, street, city, region, municipality,
+         sector, postal_code, phone
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(customer_id, address_type) DO UPDATE SET
+         recipient_name = excluded.recipient_name,
+         street = excluded.street,
+         city = excluded.city,
+         region = excluded.region,
+         municipality = excluded.municipality,
+         sector = excluded.sector,
+         postal_code = excluded.postal_code,
+         phone = excluded.phone`
+    )
+    .run(
+      customerId,
+      type,
+      address.name,
+      address.street,
+      address.city,
+      address.region,
+      address.municipality,
+      address.sector,
+      address.postalCode,
+      address.phone
+    );
+}
+
 /** Lee pedidos y líneas históricas de artículos en orden descendente de fecha. */
 function readOrders(database) {
   const orders = database
     .prepare(
       `SELECT id, date, customer_id AS customerId, customer_name AS customerName,
-              recipient_name AS recipientName, street, city, region,
-              postal_code AS postalCode, phone, total, status,
+              recipient_name AS recipientName, street, city, region, municipality, sector,
+              postal_code AS postalCode, phone, delivery_method AS deliveryMethod,
+              eps_location_id AS epsLocationId, eps_location_name AS epsLocationName, total, status,
               confirmed_at AS confirmedAt, cancelled_at AS cancelledAt
        FROM orders ORDER BY date DESC, rowid DESC`
     )
@@ -1001,8 +1116,22 @@ function readOrders(database) {
       street: order.street,
       city: order.city,
       region: order.region,
+      municipality: order.municipality,
+      sector: order.sector,
       postalCode: order.postalCode,
       phone: order.phone,
+      ...(order.deliveryMethod === "eps"
+        ? {
+            deliveryMethod: "eps",
+            epsLocation: {
+              id: order.epsLocationId,
+              name: order.epsLocationName,
+              address: order.street,
+              city: order.city,
+              region: order.region,
+            },
+          }
+        : {}),
     },
     items: getItems.all(order.id),
     total: order.total,

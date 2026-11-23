@@ -50,6 +50,7 @@ const maximumLoginAttempts = 5;
  *     createAccountToken: (customerId: string, purpose: "verify-email"|"reset-password", tokenHash: string, expiresAt: number) => void,
  *     verifyCustomerEmail: (tokenHash: string, now: number) => (import("../src/JS/models.js").Customer|null),
  *     resetCustomerPassword: (tokenHash: string, credentials: {salt: string, passwordHash: string}, now: number) => (import("../src/JS/models.js").Customer|null),
+ *     getCustomerAddresses: (customerId: string) => {primary: object|null, alternate: object|null},
  *     createOrder: (customerId: string, order: object) => import("../src/JS/models.js").Order,
  *     getOrders: () => import("../src/JS/models.js").Order[],
  *     confirmOrder: (orderId: string) => import("../src/JS/models.js").Order,
@@ -367,6 +368,20 @@ export function createApp({
         : null;
     if (customerId && !customer) customerAuth.revokeSession(token);
     return response.json({ authenticated: Boolean(customer), customer: customer || null });
+  });
+
+  app.get("/api/account/addresses", (request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    const token = readNamedCookie(request.get("cookie"), customerSessionCookieName);
+    const customerId = customerAuth.readSession(token);
+    if (
+      !customerId ||
+      !catalogRepository.isCustomerEmailVerified(customerId) ||
+      !catalogRepository.getCustomerById(customerId)
+    ) {
+      return response.status(401).json({ error: "Inicia sesión para consultar tus direcciones." });
+    }
+    return response.json(catalogRepository.getCustomerAddresses(customerId));
   });
 
   app.post("/api/account/logout", (request, response) => {

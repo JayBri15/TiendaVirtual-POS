@@ -4,6 +4,7 @@ import {
   createCustomerOrder,
   loginCustomer,
   logoutCustomer,
+  readCustomerAddresses,
   readCustomerSession,
   requestCustomerPasswordReset,
   registerCustomer,
@@ -11,6 +12,7 @@ import {
   resetCustomerPassword,
   verifyCustomerEmail,
 } from "../src/JS/services/customerApi.js";
+import { EPS_LOCATIONS } from "../shared/epsLocations.js";
 
 const originalFetch = globalThis.fetch;
 
@@ -32,6 +34,24 @@ describe("API de cuentas de cliente", () => {
       if (url.endsWith("/session")) {
         return { ok: true, json: async () => ({ authenticated: true, customer }) };
       }
+      if (url.endsWith("/addresses")) {
+        return {
+          ok: true,
+          json: async () => ({
+            primary: {
+              name: customer.name,
+              street: "Calle Principal",
+              city: "Santo Domingo",
+              region: "Distrito Nacional",
+              municipality: "Santo Domingo de Guzmán",
+              sector: "Zona Colonial",
+              postalCode: "10210",
+              phone: customer.phone,
+            },
+            alternate: null,
+          }),
+        };
+      }
       if (url.endsWith("/logout")) return { ok: true };
       if (url.endsWith("/verification/resend") || url.endsWith("/password-reset/request")) {
         return { ok: true, json: async () => ({ message: "Correo enviado." }) };
@@ -50,6 +70,7 @@ describe("API de cuentas de cliente", () => {
     };
 
     assert.deepEqual(await readCustomerSession(), customer);
+    assert.equal((await readCustomerAddresses()).alternate, null);
     assert.deepEqual(await loginCustomer(customer.email, "CompraSegura#2026"), customer);
     assert.deepEqual(await registerCustomer({ ...customer, password: "CompraSegura#2026" }), {
       customer,
@@ -65,6 +86,7 @@ describe("API de cuentas de cliente", () => {
       requests.map(({ url, options }) => [url, options.method || "GET", options.credentials]),
       [
         ["/api/account/session", "GET", "same-origin"],
+        ["/api/account/addresses", "GET", "same-origin"],
         ["/api/account/login", "POST", "same-origin"],
         ["/api/account/register", "POST", "same-origin"],
         ["/api/account/verify-email", "POST", "same-origin"],
@@ -74,20 +96,29 @@ describe("API de cuentas de cliente", () => {
         ["/api/account/logout", "POST", "same-origin"],
       ]
     );
-    assert.deepEqual(JSON.parse(requests[2].options.body), {
+    assert.deepEqual(JSON.parse(requests[3].options.body), {
       ...customer,
       password: "CompraSegura#2026",
     });
   });
 
-  it("envía únicamente dirección y cantidades para crear un pedido", async () => {
+  it("envía dirección y cantidades sin precios para crear un pedido", async () => {
     const requests = [];
     const order = {
       id: "order-1",
       date: "2026-10-19T12:00:00.000Z",
       customerId: "customer-1",
       customerName: "Cliente",
-      shippingAddress: { name: "Cliente", street: "123 Calle" },
+      shippingAddress: {
+        name: "Cliente",
+        street: "123 Calle",
+        city: "Santo Domingo",
+        region: "Distrito Nacional",
+        municipality: "Santo Domingo de Guzmán",
+        sector: "Zona Colonial",
+        postalCode: "10210",
+        phone: "555-0100",
+      },
       items: [
         {
           productId: "product-1",
@@ -105,7 +136,16 @@ describe("API de cuentas de cliente", () => {
       return { ok: true, json: async () => order };
     };
     const request = {
-      address: { name: "Cliente", street: "123 Calle" },
+      address: {
+        name: "Cliente",
+        street: "123 Calle",
+        city: "Santo Domingo",
+        region: "Distrito Nacional",
+        municipality: "Santo Domingo de Guzmán",
+        sector: "Zona Colonial",
+        postalCode: "10210",
+        phone: "555-0100",
+      },
       items: [{ productId: "product-1", quantity: 2 }],
     };
 
@@ -113,5 +153,50 @@ describe("API de cuentas de cliente", () => {
     assert.equal(requests[0].url, "/api/orders");
     assert.equal(requests[0].options.credentials, "same-origin");
     assert.deepEqual(JSON.parse(requests[0].options.body), request);
+  });
+
+  it("envía y valida pedidos para retirar en una sucursal EPS", async () => {
+    const location = EPS_LOCATIONS[0];
+    const order = {
+      id: "order-eps",
+      date: "2026-10-19T12:00:00.000Z",
+      customerId: "customer-1",
+      customerName: "Cliente",
+      shippingAddress: {
+        name: "Cliente",
+        street: location.address,
+        city: location.city,
+        region: location.region,
+        municipality: "",
+        sector: "",
+        postalCode: "",
+        phone: "555-0100",
+        deliveryMethod: "eps",
+        epsLocation: location,
+      },
+      items: [
+        {
+          productId: "product-1",
+          name: "Producto",
+          sku: "SKU-1",
+          unitPrice: 12,
+          quantity: 1,
+        },
+      ],
+      total: 12,
+      status: "pending",
+    };
+    const request = {
+      address: { name: "Cliente", phone: "555-0100" },
+      deliveryMethod: "eps",
+      epsLocationId: location.id,
+      items: [{ productId: "product-1", quantity: 1 }],
+    };
+    globalThis.fetch = async (_url, options = {}) => {
+      assert.deepEqual(JSON.parse(options.body), request);
+      return { ok: true, json: async () => order };
+    };
+
+    assert.deepEqual(await createCustomerOrder(request), order);
   });
 });

@@ -40,6 +40,29 @@ export async function readCustomerSession() {
 }
 
 /**
+ * Lee las ubicaciones guardadas en la cuenta del cliente.
+ * @returns {Promise<{primary: object|null, alternate: object|null}>}
+ */
+export async function readCustomerAddresses() {
+  const response = await fetch("/api/account/addresses", {
+    cache: "no-store",
+    credentials: "same-origin",
+  });
+  if (!response.ok) throw new Error(await readApiError(response));
+  const result = await response.json();
+  if (
+    !result ||
+    !("primary" in result) ||
+    !("alternate" in result) ||
+    (result.primary !== null && !isAddress(result.primary)) ||
+    (result.alternate !== null && !isAddress(result.alternate))
+  ) {
+    throw new TypeError("La respuesta de ubicaciones del cliente no cumple el formato esperado.");
+  }
+  return result;
+}
+
+/**
  * Inicia una sesión de cliente y deja la cookie protegida en el navegador.
  */
 export async function loginCustomer(email, password) {
@@ -148,7 +171,7 @@ export async function logoutCustomer() {
 
 /**
  * Crea un pedido pendiente. El backend calcula precios y vuelve a comprobar stock.
- * @param {{address: object, items: Array<{productId: string, quantity: number}>}} order Solicitud sin precios.
+ * @param {{address: object, deliveryMethod?: "address"|"eps", epsLocationId?: string, items: Array<{productId: string, quantity: number}>}} order Solicitud sin precios.
  * @returns {Promise<import("../models.js").Order>} Pedido persistido.
  */
 export async function createCustomerOrder(order) {
@@ -167,15 +190,34 @@ export async function createCustomerOrder(order) {
   return savedOrder;
 }
 
+function isAddress(address) {
+  return (
+    address &&
+    typeof address.name === "string" &&
+    typeof address.street === "string" &&
+    typeof address.city === "string" &&
+    typeof address.region === "string" &&
+    typeof address.municipality === "string" &&
+    typeof address.sector === "string" &&
+    typeof address.postalCode === "string" &&
+    typeof address.phone === "string"
+  );
+}
+
 function isOrder(order) {
+  const shippingAddress = order?.shippingAddress;
   return (
     order &&
     typeof order.id === "string" &&
     typeof order.date === "string" &&
     typeof order.customerId === "string" &&
     typeof order.customerName === "string" &&
-    order.shippingAddress &&
-    typeof order.shippingAddress.name === "string" &&
+    shippingAddress &&
+    typeof shippingAddress.name === "string" &&
+    (shippingAddress.deliveryMethod === undefined ||
+      shippingAddress.deliveryMethod === "address" ||
+      shippingAddress.deliveryMethod === "eps") &&
+    (shippingAddress.deliveryMethod !== "eps" || isEpsLocation(shippingAddress.epsLocation)) &&
     Array.isArray(order.items) &&
     order.items.every(
       (item) =>
@@ -190,5 +232,16 @@ function isOrder(order) {
     Number.isFinite(order.total) &&
     order.total >= 0 &&
     order.status === "pending"
+  );
+}
+
+function isEpsLocation(location) {
+  return (
+    location &&
+    typeof location.id === "string" &&
+    typeof location.name === "string" &&
+    typeof location.address === "string" &&
+    typeof location.city === "string" &&
+    typeof location.region === "string"
   );
 }

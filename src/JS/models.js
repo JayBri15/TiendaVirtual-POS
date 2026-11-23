@@ -110,7 +110,7 @@
  * @property {string} date Fecha ISO de creación.
  * @property {string|null} customerId Cuenta que creó el pedido.
  * @property {string} customerName Nombre capturado de la cuenta.
- * @property {{name: string, street: string, city: string, region: string, postalCode: string, phone: string}} shippingAddress Dirección de entrega capturada.
+ * @property {{name: string, street: string, city: string, region: string, municipality: string, sector: string, postalCode: string, phone: string, deliveryMethod?: "eps", epsLocation?: {id: string, name: string, address: string, city: string, region: string}}} shippingAddress Dirección de entrega o sucursal EPS capturada.
  * @property {SaleItem[]} items Artículos, precios y nombres congelados al crear.
  * @property {number} total Total calculado con los precios del servidor.
  * @property {"pending"|"confirmed"|"cancelled"} status Estado del pedido.

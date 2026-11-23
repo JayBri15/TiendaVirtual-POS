@@ -1,3 +1,5 @@
+import { EPS_LOCATIONS } from "../shared/epsLocations.js";
+
 /**
  * Error de validación que la API devuelve como HTTP 400.
  */
@@ -21,14 +23,43 @@ export function validateOrderRequest(value) {
   if (!address || typeof address !== "object" || Array.isArray(address)) {
     throw new OrderValidationError("Completa los datos de entrega.");
   }
-  const normalizedAddress = {
+  const deliveryMethod = value.deliveryMethod ?? "address";
+  if (deliveryMethod !== "address" && deliveryMethod !== "eps") {
+    throw new OrderValidationError("Selecciona una modalidad de entrega válida.");
+  }
+  const recipient = {
     name: requiredText(address.name, "El nombre", 120),
-    street: requiredText(address.street, "La dirección", 200),
-    city: requiredText(address.city, "La ciudad", 100),
-    region: requiredText(address.region, "El estado o provincia", 100),
-    postalCode: requiredText(address.postalCode, "El código postal", 20),
     phone: requiredText(address.phone, "El teléfono", 40),
   };
+  let normalizedAddress;
+  let epsLocation = null;
+  if (deliveryMethod === "eps") {
+    epsLocation = EPS_LOCATIONS.find((location) => location.id === value.epsLocationId);
+    if (!epsLocation) {
+      throw new OrderValidationError("Selecciona una sucursal EPS válida.");
+    }
+    normalizedAddress = {
+      ...recipient,
+      street: epsLocation.address,
+      city: epsLocation.city,
+      region: epsLocation.region,
+      municipality: "",
+      sector: "",
+      postalCode: "",
+      deliveryMethod,
+      epsLocation: { ...epsLocation },
+    };
+  } else {
+    normalizedAddress = {
+      ...recipient,
+      street: requiredText(address.street, "La dirección", 200),
+      city: requiredText(address.city, "La ciudad", 100),
+      region: requiredText(address.region, "La provincia", 100),
+      municipality: requiredText(address.municipality, "El municipio", 100),
+      sector: requiredText(address.sector, "El sector", 100),
+      postalCode: requiredText(address.postalCode, "El código postal", 20),
+    };
+  }
   if (
     !Array.isArray(value.items) ||
     value.items.length === 0 ||
@@ -50,6 +81,9 @@ export function validateOrderRequest(value) {
   }
   return {
     address: normalizedAddress,
+    deliveryMethod,
+    epsLocation,
+    saveAsAlternate: deliveryMethod === "address" && value.saveAsAlternate === true,
     items: value.items.map(({ productId, quantity }) => ({ productId, quantity })),
   };
 }

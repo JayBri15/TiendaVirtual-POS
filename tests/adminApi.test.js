@@ -137,6 +137,8 @@ describe("API de Admin", () => {
         street: "123 Calle",
         city: "Ciudad",
         region: "Estado",
+        municipality: "Municipio",
+        sector: "Sector",
         postalCode: "12345",
         phone: "555-0100",
       },

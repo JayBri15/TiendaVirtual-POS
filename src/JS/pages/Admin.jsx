@@ -1645,8 +1645,30 @@ export function Admin() {
               <td>
                 {order.shippingAddress.name}
                 <span className="block text-xs text-muted">
-                  {order.shippingAddress.street}, {order.shippingAddress.city},{" "}
-                  {order.shippingAddress.region} {order.shippingAddress.postalCode}
+                  {order.shippingAddress.deliveryMethod === "eps" ? (
+                    <>
+                      Retiro en EPS: {order.shippingAddress.epsLocation.name}
+                      <br />
+                      {[
+                        order.shippingAddress.epsLocation.address,
+                        order.shippingAddress.epsLocation.city,
+                        order.shippingAddress.epsLocation.region,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}
+                    </>
+                  ) : (
+                    [
+                      order.shippingAddress.street,
+                      order.shippingAddress.sector,
+                      order.shippingAddress.municipality,
+                      order.shippingAddress.city,
+                      order.shippingAddress.region,
+                      order.shippingAddress.postalCode,
+                    ]
+                      .filter(Boolean)
+                      .join(", ")
+                  )}
                 </span>
               </td>
               <td>{order.items.reduce((sum, item) => sum + item.quantity, 0)}</td>

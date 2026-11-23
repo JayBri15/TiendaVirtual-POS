@@ -16,6 +16,7 @@
     "format:check": "prettier --check \"backend/**/*.js\" \"src/**/*.{js,jsx,css,html}\" \"tests/**/*.js\" \"vite.config.js\" \"README.md\""
   },
   "dependencies": {
+    "dominican-republic-geodata": "0.2.2",
     "dotenv": "^17.2.3",
     "express": "^5.3.0",
     "nodemailer": "^10.1.7",

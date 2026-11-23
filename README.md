@@ -20,10 +20,12 @@ Tienda online con catálogo, checkout y panel de administración. La aplicación
 
 - 🛒 Catálogo con productos, categorías y fichas de producto.
 - 👤 Cuentas de cliente, verificación por correo y recuperación de contraseña.
-- 📦 Checkout con pedidos persistidos en el backend.
+- 📦 Checkout con direcciones guardadas y retiro en sucursales EPS de República Dominicana.
 - 🧾 Panel Admin para gestionar productos, categorías, clientes, ventas y pedidos.
 - 💾 Persistencia SQLite para catálogo, cuentas, ventas y pedidos.
 - 📱 Vistas de tienda, checkout y administración dentro de una aplicación React.
+
+El formulario de entrega usa los datos territoriales de provincias y municipios de [`dominican-republic-geodata`](https://www.npmjs.com/package/dominican-republic-geodata), basados en la División Territorial 2021 de la Oficina Nacional de Estadística (ONE). El país es República Dominicana; provincia y municipio se eligen de listas encadenadas, mientras ciudad, sector y calle se capturan por separado. El cliente también puede elegir una sucursal EPS de la lista compartida en `shared/epsLocations.js`; el servidor valida y guarda la sucursal elegida con el pedido.
 
 ## 🧰 Requisitos
 
@@ -118,7 +120,7 @@ Las tarjetas del catálogo abren las fichas de producto mediante `#producto/<id>
 ### 🧾 Ventas y pedidos
 
 - **Ventas:** el servidor vuelve a comprobar las existencias y calcula el total con los precios actuales de SQLite. La venta, los precios y nombres históricos y el descuento de inventario se guardan en una transacción. Si falta stock o un producto, no se aplica ningún cambio parcial. Anular una venta restaura el inventario y conserva el registro como anulado.
-- **Pedidos:** Checkout requiere una sesión de cliente con correo verificado. Envía únicamente cantidades, identificadores de producto y dirección; el servidor calcula los precios y comprueba el stock. Crear un pedido no reserva ni descuenta existencias. Admin vuelve a comprobarlas y las descuenta al confirmar el pedido; si lo cancela después, las restaura. Los pedidos y sus líneas se guardan aparte de las ventas y conservan una instantánea de los productos.
+- **Pedidos:** Checkout requiere una sesión de cliente con correo verificado. Envía únicamente cantidades, identificadores de producto y datos de entrega (dirección o sucursal EPS); el servidor calcula los precios, valida la sucursal y comprueba el stock. Crear un pedido no reserva ni descuenta existencias. Admin vuelve a comprobarlas y las descuenta al confirmar el pedido; si lo cancela después, las restaura. Los pedidos y sus líneas se guardan aparte de las ventas y conservan una instantánea de los productos.
 - **Historial:** las ventas conservan una instantánea de cada artículo y del nombre del cliente en el momento de la compra, incluso si después se edita o elimina ese cliente.
 
 ### 💾 Persistencia y datos de demostración
@@ -142,6 +144,8 @@ Los productos, las categorías y los datos privados de clientes, ventas y pedido
 │   ├── productValidation.js          # Validación de productos y categorías
 │   ├── saleValidation.js             # Validación de solicitudes de venta
 │   └── server.js                     # Inicio del servidor Node.js
+├── shared/
+│   └── epsLocations.js               # Ubicaciones EPS compartidas con frontend y backend
 ├── src/
 │   ├── CSS/app.css                   # Tailwind y estilos compartidos
 │   ├── JS/

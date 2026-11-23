@@ -228,6 +228,10 @@ const isOrder = (order) =>
   order.shippingAddress &&
   typeof order.shippingAddress.name === "string" &&
   typeof order.shippingAddress.street === "string" &&
+  (order.shippingAddress.municipality === undefined ||
+    typeof order.shippingAddress.municipality === "string") &&
+  (order.shippingAddress.sector === undefined ||
+    typeof order.shippingAddress.sector === "string") &&
   Array.isArray(order.items) &&
   order.items.every(
     (item) =>
