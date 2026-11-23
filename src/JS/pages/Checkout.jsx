@@ -334,7 +334,6 @@ export function Checkout() {
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Brand to="./#inicio" />
-          <span className="hidden text-xs text-muted sm:block">Sesión: {customer?.name}</span>
           <a href="./#todos-productos" className="text-xs font-semibold text-leaf">
             Seguir comprando
           </a>
