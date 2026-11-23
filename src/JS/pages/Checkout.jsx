@@ -258,7 +258,10 @@ export function Checkout() {
         <header className="border-b border-line bg-white">
           <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
             <Brand to="./#inicio" />
-            <a href="./#todos-productos" className="text-xs font-semibold text-leaf">
+            <a
+              href="./#todos-productos"
+              className="rounded-full border border-line bg-white px-4 py-2 text-xs font-semibold text-leaf transition hover:bg-paper"
+            >
               Seguir comprando
             </a>
           </div>
@@ -334,7 +337,10 @@ export function Checkout() {
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <Brand to="./#inicio" />
-          <a href="./#todos-productos" className="text-xs font-semibold text-leaf">
+          <a
+            href="./#todos-productos"
+            className="rounded-full border border-line bg-white px-4 py-2 text-xs font-semibold text-leaf transition hover:bg-paper"
+          >
             Seguir comprando
           </a>
         </div>
@@ -497,15 +503,32 @@ export function Checkout() {
                                 </button>
                               </div>
                             </div>
-                            <div className="text-right">
+                            <div className="flex flex-col items-end justify-between">
                               <strong className="text-sm">
                                 {money(item.price * item.quantity)}
                               </strong>
                               <button
-                                className="mt-3 block text-xs text-[#9d5144] underline"
+                                type="button"
+                                className="grid h-9 w-9 place-items-center rounded-full text-[#9d5144] transition hover:bg-[#f8ece9]"
                                 onClick={() => updateCart(item.id, 0)}
+                                aria-label={`Eliminar ${item.name} del carrito`}
+                                title="Eliminar del carrito"
                               >
-                                Eliminar
+                                <svg
+                                  aria-hidden="true"
+                                  className="h-5 w-5"
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                >
+                                  <path d="M3 6h18" />
+                                  <path d="M8 6V4h8v2" />
+                                  <path d="m19 6-1 14H6L5 6" />
+                                  <path d="M10 11v5M14 11v5" />
+                                </svg>
                               </button>
                             </div>
                           </article>

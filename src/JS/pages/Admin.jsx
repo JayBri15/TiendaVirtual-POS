@@ -2291,8 +2291,10 @@ export function Admin() {
               Modo demo
             </span>
             <button
-              className="grid h-10 w-10 place-items-center rounded-full bg-[#e5eadf] text-xs font-bold text-leaf"
+              type="button"
+              className="grid h-10 w-10 place-items-center rounded-full border border-line bg-white text-leaf transition hover:bg-paper"
               aria-label="Cerrar sesión"
+              title="Cerrar sesión"
               onClick={async () => {
                 try {
                   await logoutAdmin();
@@ -2303,7 +2305,19 @@ export function Admin() {
                 }
               }}
             >
-              AD
+              <svg
+                aria-hidden="true"
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 3v9" />
+                <path d="M18.36 6.64a9 9 0 1 1-12.72 0" />
+              </svg>
             </button>
           </div>
         </header>

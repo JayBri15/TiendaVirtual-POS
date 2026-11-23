@@ -1025,7 +1025,7 @@ export function Storefront() {
                     <button
                       type="button"
                       onClick={logout}
-                      className="whitespace-nowrap text-xs font-semibold underline underline-offset-4 sm:text-sm"
+                      className="whitespace-nowrap rounded-full border border-line bg-white px-4 py-2 text-xs font-semibold text-leaf transition hover:bg-paper sm:text-sm"
                     >
                       Cerrar sesión
                     </button>
