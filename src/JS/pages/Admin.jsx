@@ -54,6 +54,176 @@ const NAVIGATION = [
   ["admins", "♧", "Administradores"],
 ];
 
+function SalesTrendChart({ days, onNavigate }) {
+  const [hoveredDay, setHoveredDay] = useState(null);
+  const maxRevenue = Math.max(1, ...days.map((day) => day.revenue));
+  const hasSales = days.some((day) => day.revenue > 0);
+
+  return (
+    <figure>
+      <figcaption className="mb-4 text-sm text-muted">
+        Ingresos de ventas completadas por día
+      </figcaption>
+      {hasSales ? (
+        <svg
+          className="h-56 w-full"
+          viewBox="0 0 700 220"
+          role="group"
+          aria-label={`Ingresos por día: ${days.map((day) => `${day.label}, ${money(day.revenue)}`).join("; ")}`}
+          preserveAspectRatio="none"
+        >
+          <line x1="20" y1="170" x2="680" y2="170" stroke="#dedfd6" />
+          {days.map((day, index) => {
+            const x = 43 + index * 98;
+            const height = day.revenue > 0 ? (day.revenue / maxRevenue) * 128 : 2;
+            const y = 170 - height;
+            const isHovered = hoveredDay === day.key;
+            return (
+              <g
+                key={day.key}
+                role="button"
+                tabIndex={0}
+                aria-label={`${day.label}: ${money(day.revenue)}, ${day.count} transacciones. Abrir ventas.`}
+                className="cursor-pointer"
+                onClick={() => onNavigate("sales")}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onNavigate("sales");
+                  }
+                }}
+                onMouseEnter={() => setHoveredDay(day.key)}
+                onMouseLeave={() => setHoveredDay(null)}
+                onFocus={() => setHoveredDay(day.key)}
+                onBlur={() => setHoveredDay(null)}
+              >
+                <title>{`${day.label}: ${money(day.revenue)} (${day.count} transacciones). Abrir ventas.`}</title>
+                <rect
+                  x={x}
+                  y={y}
+                  width="42"
+                  height={height}
+                  rx="5"
+                  fill={isHovered ? "#25483b" : day.revenue > 0 ? "#78905f" : "#e4e6df"}
+                  stroke={isHovered ? "#d9e976" : "transparent"}
+                  strokeWidth="3"
+                  style={{ filter: isHovered ? "drop-shadow(0 3px 4px #1b29234d)" : "none" }}
+                />
+                <text
+                  x={x + 21}
+                  y="195"
+                  textAnchor="middle"
+                  fill={isHovered ? "#25483b" : "#69746d"}
+                  fontSize="11"
+                  fontWeight={isHovered ? "700" : "400"}
+                >
+                  {day.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      ) : (
+        <p className="grid h-56 place-items-center rounded bg-paper text-sm text-muted">
+          No hay ventas completadas en los últimos 7 días.
+        </p>
+      )}
+    </figure>
+  );
+}
+
+function MonthlySalesChart({ revenue, comparison, salesByPaymentMethod, saleCount }) {
+  const [activeMethod, setActiveMethod] = useState(null);
+  const radius = 58;
+  const circumference = 2 * Math.PI * radius;
+  const colors = ["#25483b", "#9cad42", "#6f9c84", "#c9785b", "#7d789f"];
+  const activePaymentMethod = salesByPaymentMethod.find((item) => item.name === activeMethod);
+  let offset = 0;
+  const centerLabel = money(revenue);
+
+  return (
+    <figure className="relative flex flex-col items-center justify-center self-start py-2">
+      <figcaption className="mb-2 text-sm text-muted">Ingresos del mes</figcaption>
+      <div className="relative">
+        <svg
+          className="h-40 w-40 shrink-0"
+          viewBox="0 0 160 160"
+          role="img"
+          aria-label={`Ingresos del mes: ${centerLabel}. Distribución por método de pago: ${salesByPaymentMethod.map((item) => `${item.name}, ${item.count} ventas, ${money(item.revenue)}`).join("; ") || "sin ventas"}.`}
+        >
+          <circle cx="80" cy="80" r={radius} fill="none" stroke="#e8e9e2" strokeWidth="22" />
+          {salesByPaymentMethod.map((item, index) => {
+            const length = (item.count / saleCount) * circumference;
+            const isActive = item.name === activeMethod;
+            const segment = (
+              <circle
+                key={item.name}
+                cx="80"
+                cy="80"
+                r={radius}
+                fill="none"
+                stroke={colors[index % colors.length]}
+                strokeWidth={isActive ? "30" : "22"}
+                strokeDasharray={`${length} ${circumference - length}`}
+                strokeDashoffset={-offset}
+                transform="rotate(-90 80 80)"
+                role="button"
+                tabIndex={0}
+                aria-label={`${item.name}: ${item.count} ventas, ${money(item.revenue)}. Resaltar método de pago.`}
+                className="cursor-pointer outline-none transition-[stroke-width,filter] duration-150 focus-visible:stroke-[#d9e976]"
+                style={{
+                  filter: isActive ? "drop-shadow(0 2px 3px #1b29234d)" : "none",
+                }}
+                onMouseEnter={() => setActiveMethod(item.name)}
+                onMouseLeave={() => setActiveMethod(null)}
+                onClick={() => setActiveMethod(item.name)}
+                onFocus={() => setActiveMethod(item.name)}
+                onBlur={() => setActiveMethod(null)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setActiveMethod(item.name);
+                  }
+                  if (event.key === "Escape") setActiveMethod(null);
+                }}
+              />
+            );
+            offset += length;
+            return segment;
+          })}
+          <text
+            x="80"
+            y="86"
+            textAnchor="middle"
+            fill="#1b2923"
+            fontSize={centerLabel.length > 10 ? "13" : "16"}
+            fontWeight="700"
+          >
+            {centerLabel}
+          </text>
+        </svg>
+        {activePaymentMethod && (
+          <div
+            className="pointer-events-none absolute right-0 top-2 z-20 w-40 rounded-lg border border-line bg-white p-3 text-xs shadow-lg"
+            role="status"
+            aria-live="polite"
+          >
+            <strong className="block truncate text-sm text-ink">{activePaymentMethod.name}</strong>
+            <span className="mt-1 block text-muted">
+              {activePaymentMethod.count} {activePaymentMethod.count === 1 ? "venta" : "ventas"} ·{" "}
+              {Math.round((activePaymentMethod.count / saleCount) * 100)}%
+            </span>
+            <span className="mt-1 block font-semibold text-leaf">
+              {money(activePaymentMethod.revenue)}
+            </span>
+          </div>
+        )}
+      </div>
+      {comparison && <p className="mt-2 text-center text-xs text-muted">{comparison}</p>}
+    </figure>
+  );
+}
+
 function DeliverySettingsPanel({ settings, error, busy, onChange, onSave }) {
   const [provinceId, setProvinceId] = useState(PROVINCES[0]?.id || "");
   const [municipalitySearch, setMunicipalitySearch] = useState("");
@@ -1644,19 +1814,83 @@ export function Admin() {
   );
   let content;
 
-  // El resumen muestra métricas operativas, ventas recientes y accesos frecuentes.
+  // El resumen combina ingresos confirmados, actividad del negocio y accesos frecuentes.
   if (active === "dashboard") {
     const low = data.products.filter((product) => product.stock <= LOW_STOCK).length;
+    const now = new Date();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const validSales = data.sales.filter(
+      (sale) => sale.status === "completed" && Number.isFinite(new Date(sale.date).getTime())
+    );
+    const monthSales = validSales.filter((sale) => new Date(sale.date) >= monthStart);
+    const salesByPaymentMethod = [
+      ...monthSales.reduce((methods, sale) => {
+        const name = sale.paymentMethod || "No especificado";
+        const current = methods.get(name) || { name, count: 0, revenue: 0 };
+        current.count += 1;
+        current.revenue += sale.total;
+        methods.set(name, current);
+        return methods;
+      }, new Map()),
+    ]
+      .map(([, method]) => method)
+      .sort((left, right) => right.count - left.count);
+    const monthRevenue = monthSales.reduce((sum, sale) => sum + sale.total, 0);
+    const monthChange = monthSales.length === 0 ? "No hay ventas registradas este mes" : "";
+    const trendDays = Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 6 + index);
+      const key = `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+      const daySales = validSales.filter((sale) => {
+        const saleDate = new Date(sale.date);
+        return (
+          saleDate.getFullYear() === date.getFullYear() &&
+          saleDate.getMonth() === date.getMonth() &&
+          saleDate.getDate() === date.getDate()
+        );
+      });
+      return {
+        key,
+        label: date.toLocaleDateString("es-MX", { weekday: "short", day: "numeric" }),
+        revenue: daySales.reduce((sum, sale) => sum + sale.total, 0),
+        count: daySales.length,
+      };
+    });
+    const productSales = new Map();
+    validSales.forEach((sale) =>
+      sale.items.forEach((item) => {
+        const current = productSales.get(item.productId) || { name: item.name, quantity: 0 };
+        current.quantity += item.quantity;
+        productSales.set(item.productId, current);
+      })
+    );
+    const bestSellers = [...productSales.values()]
+      .sort((left, right) => right.quantity - left.quantity)
+      .slice(0, 5);
+    const maxUnitsSold = Math.max(1, ...bestSellers.map((item) => item.quantity));
+    const pendingOrders = orders.filter((order) => order.status === "pending").length;
     const metrics = [
-      [
-        "Ventas de hoy",
-        money(todaySales.reduce((sum, sale) => sum + sale.total, 0)),
-        `${todaySales.length} transacciones`,
-        "↗",
-      ],
-      ["Productos", data.products.length, `${data.categories.length} categorías`, "◇"],
-      ["Stock bajo", low, `Umbral: ${LOW_STOCK} unidades o menos`, "▤"],
-      ["Clientes", data.customers.length, "Registrados en el portal", "♙"],
+      { type: "monthlySales" },
+      {
+        label: "Ventas de hoy",
+        value: todaySales.length,
+        foot: `${money(todaySales.reduce((sum, sale) => sum + sale.total, 0))} en ingresos`,
+        icon: "▥",
+        destination: "sales",
+      },
+      {
+        label: "Pedidos pendientes",
+        value: pendingOrders,
+        foot: "Esperando revisión en Admin",
+        icon: "▣",
+        destination: "orders",
+      },
+      {
+        label: "Stock bajo",
+        value: low,
+        foot: `Umbral: ${LOW_STOCK} unidades o menos`,
+        icon: "▤",
+        destination: "inventory",
+      },
     ];
     content = (
       <>
@@ -1664,23 +1898,116 @@ export function Admin() {
           <p className="text-xs font-bold uppercase tracking-[.18em] text-[#72805a]">Resumen</p>
           <h2 className="mt-1 font-display text-3xl">Un vistazo a tu operación</h2>
           <p className="mt-2 text-sm text-muted">
-            Resumen de actividad y accesos rápidos al portal.
+            Ventas, productos más solicitados y alertas operativas.
           </p>
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {metrics.map(([label, value, foot, icon]) => (
-            <article className="card p-5" key={label}>
-              <div className="flex justify-between text-sm text-muted">
-                <span>{label}</span>
-                <span className="text-xl text-[#78905f]">{icon}</span>
-              </div>
-              <strong className="mt-4 block font-display text-3xl">{value}</strong>
-              <span className="mt-1 block text-xs text-muted">{foot}</span>
-            </article>
-          ))}
+        <div className="grid items-end gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {metrics.map((metric) => {
+            if (metric.type === "monthlySales") {
+              return (
+                <MonthlySalesChart
+                  key="monthly-sales"
+                  revenue={monthRevenue}
+                  comparison={monthChange}
+                  salesByPaymentMethod={salesByPaymentMethod}
+                  saleCount={monthSales.length}
+                />
+              );
+            }
+            const { label, value, foot, icon, destination } = metric;
+            const details = (
+              <>
+                <div className="flex justify-between text-sm text-muted transition-colors group-hover:text-white">
+                  <span>{label}</span>
+                  <span className="text-xl text-[#78905f] transition-colors group-hover:text-[#d9e976]">
+                    {icon}
+                  </span>
+                </div>
+                <strong className="mt-4 inline-block font-display text-3xl transition-colors group-hover:text-white">
+                  {value}
+                </strong>
+                <span className="mt-1 flex items-center justify-between gap-2 text-xs text-muted transition-colors group-hover:text-white">
+                  <span>{foot}</span>
+                  {destination && (
+                    <span className="shrink-0 font-semibold text-leaf opacity-0 transition-opacity group-hover:text-[#d9e976] group-hover:opacity-100 group-focus-visible:opacity-100">
+                      Ver →
+                    </span>
+                  )}
+                </span>
+              </>
+            );
+            if (!destination) {
+              return (
+                <article className="card p-5" key={label}>
+                  {details}
+                </article>
+              );
+            }
+            const destinationLabel = NAVIGATION.find(([id]) => id === destination)?.[2];
+            return (
+              <button
+                type="button"
+                className="card admin-metric-card group w-full cursor-pointer p-5 text-left transition duration-200 hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf"
+                key={label}
+                onClick={() => setActive(destination)}
+                aria-label={`${label}: ${value}. Abrir ${destinationLabel}.`}
+                title={`Abrir ${destinationLabel}`}
+              >
+                {details}
+              </button>
+            );
+          })}
         </div>
         <div className="mt-7 grid gap-5 xl:grid-cols-[1.4fr_.8fr]">
-          <section className="card p-5">
+          <section className="card p-5 sm:p-6">
+            <h3 className="font-display text-xl">Volumen de ventas</h3>
+            <p className="mt-1 text-xs text-muted">
+              Promedio por venta este mes:{" "}
+              {money(monthSales.length ? monthRevenue / monthSales.length : 0)}
+            </p>
+            <div className="mt-4">
+              <SalesTrendChart days={trendDays} onNavigate={setActive} />
+            </div>
+          </section>
+          <section className="card p-5 sm:p-6">
+            <h3 className="font-display text-xl">Productos más vendidos</h3>
+            <p className="mt-1 text-xs text-muted">Unidades en ventas completadas</p>
+            {bestSellers.length ? (
+              <ol className="mt-5 grid gap-4">
+                {bestSellers.map((item, index) => (
+                  <li key={`${item.name}-${index}`}>
+                    <button
+                      type="button"
+                      className="group w-full cursor-pointer rounded p-2 text-left transition hover:bg-[#f8f9f3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf"
+                      onClick={() => setActive("products")}
+                      aria-label={`${item.name}: ${item.quantity} unidades vendidas. Abrir productos.`}
+                      title="Abrir productos"
+                    >
+                      <div className="mb-1 flex justify-between gap-3 text-sm">
+                        <span className="truncate">{item.name}</span>
+                        <strong className="transition-colors group-hover:text-leaf">
+                          {item.quantity}
+                        </strong>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-paper" aria-hidden="true">
+                        <div
+                          className="h-full rounded-full bg-[#78905f] transition-colors group-hover:bg-leaf"
+                          style={{ width: `${(item.quantity / maxUnitsSold) * 100}%` }}
+                        />
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="mt-5 rounded bg-paper p-4 text-sm text-muted">
+                Aún no hay ventas completadas para mostrar.
+              </p>
+            )}
+          </section>
+        </div>
+        <div className="mt-7 grid gap-5 xl:grid-cols-[1.4fr_.8fr]">
+          <section className="card p-5 sm:p-6">
             <h3 className="mb-3 font-display text-xl">Actividad reciente</h3>
             {table(
               ["Venta", "Fecha", "Cliente", "Total", "Estado"],
@@ -1700,7 +2027,7 @@ export function Admin() {
               "Aún no hay ventas. Registra una desde el punto de venta."
             )}
           </section>
-          <section className="card p-5">
+          <section className="card p-5 sm:p-6">
             <h3 className="font-display text-xl">Accesos rápidos</h3>
             <div className="mt-4 grid gap-2">
               {[

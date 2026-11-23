@@ -281,6 +281,12 @@ button:disabled {
   background: #fffefa;
   box-shadow: 0 6px 24px #1b29230a;
 }
+.admin-metric-card:hover,
+.admin-metric-card:focus-visible {
+  border-color: #25483b;
+  background-color: #25483b;
+  box-shadow: 0 10px 28px rgba(37, 72, 59, 0.28);
+}
 .table-scroll {
   overflow-x: auto;
 }
