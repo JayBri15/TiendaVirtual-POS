@@ -21,11 +21,13 @@ Tienda online con catálogo, checkout y panel de administración. La aplicación
 - 🛒 Catálogo con productos, categorías y fichas de producto.
 - 👤 Cuentas de cliente, verificación por correo y recuperación de contraseña.
 - 📦 Checkout con direcciones guardadas y retiro en sucursales EPS de República Dominicana.
-- 🧾 Panel Admin para gestionar productos, categorías, clientes, ventas y pedidos.
+- 🧾 Panel Admin para gestionar productos, categorías, clientes, ventas, pedidos y tarifas de envío.
 - 💾 Persistencia SQLite para catálogo, cuentas, ventas y pedidos.
 - 📱 Vistas de tienda, checkout y administración dentro de una aplicación React.
 
-El formulario de entrega usa los datos territoriales de provincias y municipios de [`dominican-republic-geodata`](https://www.npmjs.com/package/dominican-republic-geodata), basados en la División Territorial 2021 de la Oficina Nacional de Estadística (ONE). El país es República Dominicana; provincia y municipio se eligen de listas encadenadas, mientras ciudad, sector y calle se capturan por separado. El cliente también puede elegir una sucursal EPS de la lista compartida en `shared/epsLocations.js`; el servidor valida y guarda la sucursal elegida con el pedido.
+El formulario de entrega usa los datos territoriales de provincias y municipios de [`dominican-republic-geodata`](https://www.npmjs.com/package/dominican-republic-geodata), basados en la División Territorial 2021 de la Oficina Nacional de Estadística (ONE). El país es República Dominicana; provincia y municipio se eligen de listas encadenadas, mientras ciudad, sector y calle se capturan por separado. El cliente puede elegir una sucursal EPS disponible en `shared/epsLocations.js`; el servidor valida y guarda la sucursal elegida con el pedido.
+
+Las tarifas iniciales provisionales (USD) son US$3, US$3.50, US$4, US$5, US$6 y US$7 para las seis zonas domiciliarias, y US$2.49 para retiro EPS. Admin permite editar estas tarifas, asignar municipios a zonas, habilitar sucursales EPS y elegir la sucursal de despacho. Los pedidos sin una zona cubierta no se pueden completar; el costo calculado se guarda junto al pedido.
 
 ## 🧰 Requisitos
 
@@ -120,12 +122,12 @@ Las tarjetas del catálogo abren las fichas de producto mediante `#producto/<id>
 ### 🧾 Ventas y pedidos
 
 - **Ventas:** el servidor vuelve a comprobar las existencias y calcula el total con los precios actuales de SQLite. La venta, los precios y nombres históricos y el descuento de inventario se guardan en una transacción. Si falta stock o un producto, no se aplica ningún cambio parcial. Anular una venta restaura el inventario y conserva el registro como anulado.
-- **Pedidos:** Checkout requiere una sesión de cliente con correo verificado. Envía únicamente cantidades, identificadores de producto y datos de entrega (dirección o sucursal EPS); el servidor calcula los precios, valida la sucursal y comprueba el stock. Crear un pedido no reserva ni descuenta existencias. Admin vuelve a comprobarlas y las descuenta al confirmar el pedido; si lo cancela después, las restaura. Los pedidos y sus líneas se guardan aparte de las ventas y conservan una instantánea de los productos.
+- **Pedidos:** Checkout requiere una sesión de cliente con correo verificado. Envía únicamente cantidades, identificadores de producto y datos de entrega (dirección o sucursal EPS); el servidor calcula los precios y la tarifa vigente, valida la cobertura y la sucursal, y comprueba el stock. Crear un pedido no reserva ni descuenta existencias. Admin vuelve a comprobarlas y las descuenta al confirmar el pedido; si lo cancela después, las restaura. Los pedidos guardan el costo de envío y sus líneas conservan una instantánea de los productos.
 - **Historial:** las ventas conservan una instantánea de cada artículo y del nombre del cliente en el momento de la compra, incluso si después se edita o elimina ese cliente.
 
 ### 💾 Persistencia y datos de demostración
 
-La primera ejecución crea `backend/data/store.sqlite` y carga datos de ejemplo si la tabla de productos está vacía. También añade automáticamente columnas nuevas a las tablas de categorías y credenciales de clientes de bases de datos anteriores.
+La primera ejecución crea `backend/data/store.sqlite` y carga datos de ejemplo si la tabla de productos está vacía. También añade automáticamente las columnas necesarias a bases de datos anteriores y crea los ajustes de entrega iniciales.
 
 Los productos, las categorías y los datos privados de clientes, ventas y pedidos se almacenan en SQLite. El carrito y el estado local utilizado para compatibilidad o migración de datos se guardan en `localStorage`. Las credenciales, los secretos y los datos operativos se mantienen fuera del navegador.
 
@@ -139,12 +141,14 @@ Los productos, las categorías y los datos privados de clientes, ventas y pedido
 │   ├── customerAccountValidation.js  # Validación de registro y contraseña
 │   ├── customerAuth.js               # Hash de contraseñas y sesiones de cliente
 │   ├── customerValidation.js         # Validación de clientes
+│   ├── deliverySettingsValidation.js # Validación de tarifas y cobertura
 │   ├── emailSender.js                # Envío de correo SMTP
 │   ├── orderValidation.js            # Validación de pedidos
 │   ├── productValidation.js          # Validación de productos y categorías
 │   ├── saleValidation.js             # Validación de solicitudes de venta
 │   └── server.js                     # Inicio del servidor Node.js
 ├── shared/
+│   ├── deliverySettings.js           # Tarifas y cálculo compartidos con frontend y backend
 │   └── epsLocations.js               # Ubicaciones EPS compartidas con frontend y backend
 ├── src/
 │   ├── CSS/app.css                   # Tailwind y estilos compartidos

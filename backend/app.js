@@ -11,6 +11,10 @@ import {
 } from "./customerAccountValidation.js";
 import { CustomerValidationError, validateCustomer } from "./customerValidation.js";
 import { OrderValidationError, validateOrderRequest } from "./orderValidation.js";
+import {
+  DeliverySettingsValidationError,
+  validateDeliverySettings,
+} from "./deliverySettingsValidation.js";
 import { SaleValidationError, validateSaleRequest } from "./saleValidation.js";
 import {
   CategoryValidationError,
@@ -53,6 +57,8 @@ const maximumLoginAttempts = 5;
  *     getCustomerAddresses: (customerId: string) => {primary: object|null, alternate: object|null},
  *     createOrder: (customerId: string, order: object) => import("../src/JS/models.js").Order,
  *     getOrders: () => import("../src/JS/models.js").Order[],
+ *     getDeliverySettings: () => object,
+ *     updateDeliverySettings: (settings: object) => object,
  *     confirmOrder: (orderId: string) => import("../src/JS/models.js").Order,
  *     cancelOrder: (orderId: string) => import("../src/JS/models.js").Order,
  *     hasActiveFulfillmentForProduct: (productId: string) => boolean
@@ -84,6 +90,31 @@ export function createApp({
       status: "ok",
       message: "Backend disponible",
     });
+  });
+
+  app.get("/api/delivery-settings", (_request, response) => {
+    response.setHeader("Cache-Control", "no-store");
+    return response.json(catalogRepository.getDeliverySettings());
+  });
+
+  app.get("/api/admin/delivery-settings", (request, response) => {
+    if (!authorizeAdmin(request, response, adminAuth)) return;
+    response.setHeader("Cache-Control", "no-store");
+    return response.json(catalogRepository.getDeliverySettings());
+  });
+
+  app.put("/api/admin/delivery-settings", (request, response) => {
+    if (!authorizeAdmin(request, response, adminAuth)) return;
+    try {
+      const settings = validateDeliverySettings(request.body);
+      return response.json(catalogRepository.updateDeliverySettings(settings));
+    } catch (error) {
+      if (error instanceof DeliverySettingsValidationError) {
+        return response.status(400).json({ error: error.message });
+      }
+      console.error("No se pudieron guardar los ajustes de entrega.", error);
+      return response.status(500).json({ error: "No se pudieron guardar los ajustes de entrega." });
+    }
   });
 
   // El registro público crea credenciales seguras y una sesión de cliente.
@@ -406,7 +437,7 @@ export function createApp({
       return response.status(401).json({ error: "Inicia sesión para crear un pedido." });
     }
     try {
-      const order = validateOrderRequest(request.body);
+      const order = validateOrderRequest(request.body, catalogRepository.getDeliverySettings());
       return response.status(201).json(catalogRepository.createOrder(customerId, order));
     } catch (error) {
       if (error instanceof OrderValidationError) {

@@ -15,6 +15,11 @@ import {
   updateAdminCustomer,
   voidAdminSale,
 } from "../src/JS/services/adminApi.js";
+import {
+  readAdminDeliverySettings,
+  updateAdminDeliverySettings,
+} from "../src/JS/services/deliveryApi.js";
+import { DEFAULT_DELIVERY_SETTINGS } from "../shared/deliverySettings.js";
 
 const originalFetch = globalThis.fetch;
 const originalStorage = globalThis.localStorage;
@@ -151,7 +156,10 @@ describe("API de Admin", () => {
           quantity: 1,
         },
       ],
-      total: 12,
+      subtotal: 12,
+      shippingCost: 3,
+      deliveryZone: { id: "zone-1", name: "Zona 1" },
+      total: 15,
       status: "pending",
     };
     globalThis.fetch = async (url, options = {}) => {
@@ -178,5 +186,26 @@ describe("API de Admin", () => {
         ["/api/admin/orders/order-1/cancel", "POST", "same-origin"],
       ]
     );
+  });
+
+  it("lee y actualiza las tarifas de envío desde las rutas protegidas", async () => {
+    const requests = [];
+    globalThis.localStorage = { setItem: () => {} };
+    const settings = structuredClone(DEFAULT_DELIVERY_SETTINGS);
+    globalThis.fetch = async (url, options = {}) => {
+      requests.push({ url, options });
+      return { ok: true, json: async () => settings };
+    };
+
+    assert.deepEqual(await readAdminDeliverySettings(), settings);
+    assert.deepEqual(await updateAdminDeliverySettings(settings), settings);
+    assert.deepEqual(
+      requests.map(({ url, options }) => [url, options.method || "GET", options.credentials]),
+      [
+        ["/api/admin/delivery-settings", "GET", "same-origin"],
+        ["/api/admin/delivery-settings", "PUT", "same-origin"],
+      ]
+    );
+    assert.deepEqual(JSON.parse(requests[1].options.body), settings);
   });
 });

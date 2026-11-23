@@ -128,7 +128,10 @@ describe("API de cuentas de cliente", () => {
           quantity: 2,
         },
       ],
-      total: 24,
+      subtotal: 24,
+      shippingCost: 3,
+      deliveryZone: { id: "zone-1", name: "Zona 1" },
+      total: 27,
       status: "pending",
     };
     globalThis.fetch = async (url, options = {}) => {
@@ -183,7 +186,10 @@ describe("API de cuentas de cliente", () => {
           quantity: 1,
         },
       ],
-      total: 12,
+      subtotal: 12,
+      shippingCost: 2.49,
+      deliveryZone: null,
+      total: 14.49,
       status: "pending",
     };
     const request = {

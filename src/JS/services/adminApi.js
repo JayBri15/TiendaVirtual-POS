@@ -228,6 +228,14 @@ const isOrder = (order) =>
   order.shippingAddress &&
   typeof order.shippingAddress.name === "string" &&
   typeof order.shippingAddress.street === "string" &&
+  Number.isFinite(order.subtotal) &&
+  order.subtotal >= 0 &&
+  Number.isFinite(order.shippingCost) &&
+  order.shippingCost >= 0 &&
+  (order.deliveryZone === null ||
+    (order.deliveryZone &&
+      typeof order.deliveryZone.id === "string" &&
+      typeof order.deliveryZone.name === "string")) &&
   (order.shippingAddress.municipality === undefined ||
     typeof order.shippingAddress.municipality === "string") &&
   (order.shippingAddress.sector === undefined ||

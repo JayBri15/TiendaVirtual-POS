@@ -34,6 +34,9 @@ import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails, getRecommendedProducts } from "../data/productDetails.js";
 import { ProductDetail } from "../shared/ProductDetail.jsx";
 import { Brand, Field, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
+import { getProvinceMunicipalities, PROVINCES } from "dominican-republic-geodata";
+import { EPS_LOCATIONS } from "../../../shared/epsLocations.js";
+import { readAdminDeliverySettings, updateAdminDeliverySettings } from "../services/deliveryApi.js";
 
 /** Reglas de negocio usadas por las operaciones del portal Admin. */
 const LOW_STOCK = 5;
@@ -46,9 +49,262 @@ const NAVIGATION = [
   ["categories", "▧", "Categorías"],
   ["customers", "♙", "Clientes"],
   ["orders", "▣", "Pedidos"],
+  ["shipping", "⌖", "Envíos"],
   ["sales", "↗", "Ventas"],
   ["admins", "♧", "Administradores"],
 ];
+
+function DeliverySettingsPanel({ settings, error, busy, onChange, onSave }) {
+  const [provinceId, setProvinceId] = useState(PROVINCES[0]?.id || "");
+  const [municipalitySearch, setMunicipalitySearch] = useState("");
+  const [bulkZoneId, setBulkZoneId] = useState("zone-6");
+  const [locationSearch, setLocationSearch] = useState("");
+  const province = PROVINCES.find((item) => item.id === provinceId);
+  const municipalities = province ? getProvinceMunicipalities(province.id) : [];
+  const filteredMunicipalities = municipalities.filter((item) =>
+    item.name.toLocaleLowerCase("es").includes(municipalitySearch.toLocaleLowerCase("es"))
+  );
+  const dispatchLocation = EPS_LOCATIONS.find(
+    (location) => location.id === settings.dispatchEpsLocationId
+  );
+  const filteredEpsLocations = EPS_LOCATIONS.filter((location) =>
+    `${location.name} ${location.city} ${location.region}`
+      .toLocaleLowerCase("es")
+      .includes(locationSearch.toLocaleLowerCase("es"))
+  );
+
+  const updateZone = (zoneId, fee) =>
+    onChange({
+      ...settings,
+      zones: settings.zones.map((zone) =>
+        zone.id === zoneId ? { ...zone, fee: Number(fee) } : zone
+      ),
+    });
+
+  const assignMunicipality = (municipalityId, zoneId) => {
+    const municipalityZones = { ...settings.municipalityZones };
+    if (zoneId) municipalityZones[municipalityId] = zoneId;
+    else delete municipalityZones[municipalityId];
+    onChange({ ...settings, municipalityZones });
+  };
+
+  const assignProvince = () => {
+    const municipalityZones = { ...settings.municipalityZones };
+    for (const municipality of municipalities) {
+      if (bulkZoneId) municipalityZones[municipality.id] = bulkZoneId;
+      else delete municipalityZones[municipality.id];
+    }
+    onChange({ ...settings, municipalityZones });
+  };
+
+  return (
+    <form className="grid gap-6" onSubmit={onSave}>
+      <section className="card p-5 sm:p-6">
+        <h3 className="font-display text-xl">Punto de despacho EPS</h3>
+        <p className="mt-1 text-sm text-muted">
+          Origen operativo para ambas modalidades; no cambia la sucursal elegida para retiro.
+        </p>
+        <label className="label mt-4" htmlFor="dispatch-eps-location">
+          Sucursal de origen
+        </label>
+        <select
+          id="dispatch-eps-location"
+          className="input"
+          value={settings.dispatchEpsLocationId}
+          onChange={(event) => onChange({ ...settings, dispatchEpsLocationId: event.target.value })}
+        >
+          {EPS_LOCATIONS.map((location) => (
+            <option key={location.id} value={location.id}>
+              {location.name} — {location.city}, {location.region}
+            </option>
+          ))}
+        </select>
+        {dispatchLocation && <p className="mt-2 text-xs text-muted">{dispatchLocation.address}</p>}
+        <label className="label mt-5" htmlFor="eps-pickup-fee">
+          Tarifa fija de retiro en sucursal EPS (USD)
+        </label>
+        <input
+          id="eps-pickup-fee"
+          className="input max-w-xs"
+          type="number"
+          min="0"
+          max="10000"
+          step="0.01"
+          required
+          value={settings.epsPickupFee}
+          onChange={(event) => onChange({ ...settings, epsPickupFee: Number(event.target.value) })}
+        />
+      </section>
+
+      <section className="card p-5 sm:p-6">
+        <h3 className="font-display text-xl">Sucursales disponibles para retiro</h3>
+        <p className="mt-1 text-sm text-muted">
+          El cliente solo podrá elegir sucursales marcadas como disponibles.
+        </p>
+        <label className="mt-4 block max-w-sm">
+          <span className="label">Buscar sucursal</span>
+          <input
+            className="input"
+            value={locationSearch}
+            onChange={(event) => setLocationSearch(event.target.value)}
+          />
+        </label>
+        <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto rounded border border-line p-3 sm:grid-cols-2">
+          {filteredEpsLocations.map((location) => (
+            <label className="flex items-start gap-2 text-sm" key={location.id}>
+              <input
+                className="mt-1 accent-[#25483b]"
+                type="checkbox"
+                checked={settings.availableEpsLocationIds.includes(location.id)}
+                onChange={(event) => {
+                  const availableEpsLocationIds = event.target.checked
+                    ? [...settings.availableEpsLocationIds, location.id]
+                    : settings.availableEpsLocationIds.filter((id) => id !== location.id);
+                  onChange({ ...settings, availableEpsLocationIds });
+                }}
+              />
+              <span>
+                <strong className="block">{location.name}</strong>
+                <span className="text-xs text-muted">
+                  {location.city}, {location.region}
+                </span>
+              </span>
+            </label>
+          ))}
+        </div>
+        {!settings.availableEpsLocationIds.length && (
+          <p className="mt-3 text-sm text-[#9d5144]" role="alert">
+            Debe permanecer al menos una sucursal EPS disponible.
+          </p>
+        )}
+      </section>
+
+      <section className="card p-5 sm:p-6">
+        <h3 className="font-display text-xl">Tarifas de entrega a domicilio</h3>
+        <p className="mt-1 text-sm text-muted">
+          Tarifas provisionales en USD. Asigna cada municipio a la zona que corresponda.
+        </p>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {settings.zones.map((zone) => {
+            const assignedCount = Object.values(settings.municipalityZones).filter(
+              (zoneId) => zoneId === zone.id
+            ).length;
+            return (
+              <label className="rounded border border-line p-4" key={zone.id}>
+                <strong className="block text-sm">{zone.name}</strong>
+                <span className="mt-1 block text-xs text-muted">
+                  {assignedCount} municipios asignados
+                </span>
+                <span className="label mt-3" aria-hidden="true">
+                  Costo (USD)
+                </span>
+                <input
+                  className="input"
+                  type="number"
+                  min="0"
+                  max="10000"
+                  step="0.01"
+                  required
+                  aria-label={`Costo de ${zone.name} en USD`}
+                  value={zone.fee}
+                  onChange={(event) => updateZone(zone.id, event.target.value)}
+                />
+              </label>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="card p-5 sm:p-6">
+        <h3 className="font-display text-xl">Cobertura por provincia y municipio</h3>
+        <p className="mt-1 text-sm text-muted">
+          Las ubicaciones sin zona asignada no podrán cotizarse ni completar el pedido.
+        </p>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <label>
+            <span className="label">Provincia</span>
+            <select
+              className="input"
+              value={provinceId}
+              onChange={(event) => setProvinceId(event.target.value)}
+            >
+              {PROVINCES.toSorted((a, b) => a.name.localeCompare(b.name, "es")).map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span className="label">Asignar toda la provincia</span>
+            <select
+              className="input"
+              value={bulkZoneId}
+              onChange={(event) => setBulkZoneId(event.target.value)}
+            >
+              <option value="">Sin asignar</option>
+              {settings.zones.map((zone) => (
+                <option key={zone.id} value={zone.id}>
+                  {zone.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-end">
+            <button className="btn-secondary w-full" type="button" onClick={assignProvince}>
+              Aplicar a todos los municipios
+            </button>
+          </div>
+        </div>
+        <label className="mt-4 block max-w-sm">
+          <span className="label">Buscar municipio</span>
+          <input
+            className="input"
+            value={municipalitySearch}
+            onChange={(event) => setMunicipalitySearch(event.target.value)}
+          />
+        </label>
+        <div className="mt-4 divide-y divide-line">
+          {filteredMunicipalities.map((municipality) => (
+            <label
+              className="grid gap-2 py-3 text-sm sm:grid-cols-[1fr_18rem] sm:items-center"
+              key={municipality.id}
+            >
+              <span>{municipality.name}</span>
+              <select
+                className="input"
+                value={settings.municipalityZones[municipality.id] || ""}
+                onChange={(event) => assignMunicipality(municipality.id, event.target.value)}
+                aria-label={`Zona de ${municipality.name}, ${province?.name}`}
+              >
+                <option value="">Sin zona asignada</option>
+                {settings.zones.map((zone) => (
+                  <option key={zone.id} value={zone.id}>
+                    {zone.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ))}
+        </div>
+      </section>
+      {error && (
+        <p className="rounded bg-[#fff4e5] p-3 text-sm text-[#8c5727]" role="alert">
+          {error}
+        </p>
+      )}
+      <div className="flex justify-end">
+        <button
+          className="btn-primary"
+          type="submit"
+          disabled={busy || settings.availableEpsLocationIds.length === 0}
+        >
+          {busy ? "Guardando tarifas…" : "Guardar configuración de envíos"}
+        </button>
+      </div>
+    </form>
+  );
+}
 
 /**
  * Campos editoriales del producto y previsualización en vivo de la ficha pública.
@@ -708,6 +964,9 @@ export function Admin() {
   // Datos de dominio y estado efímero de las vistas, diálogo y carrito POS.
   const [data, setData] = useState(readAdminData);
   const [orders, setOrders] = useState([]);
+  const [deliverySettings, setDeliverySettings] = useState(null);
+  const [deliverySettingsError, setDeliverySettingsError] = useState("");
+  const [deliverySettingsBusy, setDeliverySettingsBusy] = useState(false);
   const [active, setActive] = useState("dashboard");
   const [authenticated, setAuthenticated] = useState(false);
   const [authReady, setAuthReady] = useState(false);
@@ -728,15 +987,17 @@ export function Admin() {
         const isAuthenticated = await readAdminSession();
         if (!active) return;
         if (isAuthenticated) {
-          const [catalog, customers, sales, orders] = await Promise.all([
+          const [catalog, customers, sales, orders, settings] = await Promise.all([
             fetchPublicCatalog(),
             readAdminCustomers(),
             readAdminSales(),
             readAdminOrders(),
+            readAdminDeliverySettings(),
           ]);
           if (!active) return;
           setData((current) => ({ ...current, ...catalog, customers, sales }));
           setOrders(orders);
+          setDeliverySettings(settings);
           setAuthenticated(true);
         }
       } catch (error) {
@@ -763,10 +1024,16 @@ export function Admin() {
       return;
     }
     if (event.key === ADMIN_DATA_CHANGE_KEY) {
-      Promise.all([readAdminCustomers(), readAdminSales(), readAdminOrders()])
-        .then(([customers, sales, orders]) => {
+      Promise.all([
+        readAdminCustomers(),
+        readAdminSales(),
+        readAdminOrders(),
+        readAdminDeliverySettings(),
+      ])
+        .then(([customers, sales, orders, settings]) => {
           setData((current) => ({ ...current, customers, sales }));
           setOrders(orders);
+          setDeliverySettings(settings);
         })
         .catch((error) =>
           console.error("No se pudieron actualizar clientes y ventas desde el servidor.", error)
@@ -797,13 +1064,15 @@ export function Admin() {
     try {
       const catalog = await fetchPublicCatalog();
       await loginAdmin(email, password);
-      const [customers, sales, orders] = await Promise.all([
+      const [customers, sales, orders, settings] = await Promise.all([
         readAdminCustomers(),
         readAdminSales(),
         readAdminOrders(),
+        readAdminDeliverySettings(),
       ]);
       setData((current) => ({ ...current, ...catalog, customers, sales }));
       setOrders(orders);
+      setDeliverySettings(settings);
       setAuthNotice("");
       setAuthenticated(true);
       return "";
@@ -1262,6 +1531,25 @@ export function Admin() {
     }
   };
 
+  const saveDeliverySettings = async (event) => {
+    event.preventDefault();
+    if (!deliverySettings || deliverySettingsBusy) return;
+    setDeliverySettingsBusy(true);
+    setDeliverySettingsError("");
+    try {
+      const saved = await updateAdminDeliverySettings(deliverySettings);
+      setDeliverySettings(saved);
+      notify("La configuración de envíos se guardó.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "No se pudo guardar la configuración.";
+      setDeliverySettingsError(message);
+      notify(message, "error");
+    } finally {
+      setDeliverySettingsBusy(false);
+    }
+  };
+
   if (!authReady)
     return (
       <main className="grid min-h-screen place-items-center bg-paper px-5">
@@ -1672,7 +1960,13 @@ export function Admin() {
                 </span>
               </td>
               <td>{order.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
-              <td>{money(order.total)}</td>
+              <td>
+                {money(order.total)}
+                <span className="block text-xs text-muted">
+                  {money(order.subtotal)} + {money(order.shippingCost)} envío
+                  {order.deliveryZone ? ` · ${order.deliveryZone.name}` : " · Tarifa EPS"}
+                </span>
+              </td>
               <td>
                 {order.status === "pending"
                   ? "Pendiente"
@@ -1703,6 +1997,32 @@ export function Admin() {
             </tr>
           )),
           "Aún no hay pedidos en línea."
+        )}
+      </>
+    );
+  } else if (active === "shipping") {
+    content = (
+      <>
+        {cardHeading(
+          "Configuración de envíos",
+          "Administra las tarifas provisionales, la sucursal de despacho y la cobertura por municipio."
+        )}
+        {deliverySettings ? (
+          <DeliverySettingsPanel
+            settings={deliverySettings}
+            error={deliverySettingsError}
+            busy={deliverySettingsBusy}
+            onChange={(next) => {
+              setDeliverySettings(next);
+              setDeliverySettingsError("");
+            }}
+            onSave={saveDeliverySettings}
+          />
+        ) : (
+          <section className="card p-5 text-sm text-muted">
+            No se pudieron cargar los ajustes de entrega. Verifica la sesión del servidor y vuelve a
+            iniciar sesión.
+          </section>
         )}
       </>
     );

@@ -112,7 +112,10 @@
  * @property {string} customerName Nombre capturado de la cuenta.
  * @property {{name: string, street: string, city: string, region: string, municipality: string, sector: string, postalCode: string, phone: string, deliveryMethod?: "eps", epsLocation?: {id: string, name: string, address: string, city: string, region: string}}} shippingAddress Dirección de entrega o sucursal EPS capturada.
  * @property {SaleItem[]} items Artículos, precios y nombres congelados al crear.
- * @property {number} total Total calculado con los precios del servidor.
+ * @property {number} subtotal Importe de los artículos.
+ * @property {number} shippingCost Costo de envío calculado por el servidor.
+ * @property {{id: string, name: string}|null} deliveryZone Zona aplicada a entregas a domicilio.
+ * @property {number} total Subtotal más envío, calculado por el servidor.
  * @property {"pending"|"confirmed"|"cancelled"} status Estado del pedido.
  * @property {string} [confirmedAt] Fecha ISO de confirmación.
  * @property {string} [cancelledAt] Fecha ISO de cancelación.

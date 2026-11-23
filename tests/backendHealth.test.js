@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { createApp } from "../backend/app.js";
 import { createCatalogRepository } from "../backend/catalogRepository.js";
+import { DEFAULT_DELIVERY_SETTINGS } from "../shared/deliverySettings.js";
 import { EPS_LOCATIONS } from "../shared/epsLocations.js";
 
 const TEST_ADMIN_CONFIG = {
@@ -120,6 +121,56 @@ describe("API inicial", () => {
       status: "ok",
       message: "Backend disponible",
     });
+  });
+
+  it("publica tarifas para el checkout y protege su edición en Admin", async () => {
+    const settingsRepository = createCatalogRepository(":memory:");
+    const settingsServer = await listen(
+      createApp({
+        catalogRepository: settingsRepository,
+        adminConfig: TEST_ADMIN_CONFIG,
+      })
+    );
+    const settingsUrl = `http://127.0.0.1:${settingsServer.address().port}`;
+    try {
+      const publicResponse = await fetch(`${settingsUrl}/api/delivery-settings`);
+      const initialSettings = await publicResponse.json();
+      assert.equal(publicResponse.status, 200);
+      assert.equal(initialSettings.epsPickupFee, 2.49);
+      assert.equal(initialSettings.zones.length, 6);
+
+      const unauthorizedResponse = await fetch(`${settingsUrl}/api/admin/delivery-settings`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(initialSettings),
+      });
+      assert.equal(unauthorizedResponse.status, 401);
+
+      const loginResponse = await fetch(`${settingsUrl}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(TEST_ADMIN_CONFIG),
+      });
+      const sessionCookie = loginResponse.headers.get("set-cookie").split(";")[0];
+      const updatedSettings = {
+        ...initialSettings,
+        epsPickupFee: 2.75,
+        zones: initialSettings.zones.map((zone) =>
+          zone.id === "zone-1" ? { ...zone, fee: 3.25 } : zone
+        ),
+      };
+      const updateResponse = await fetch(`${settingsUrl}/api/admin/delivery-settings`, {
+        method: "PUT",
+        headers: { Cookie: sessionCookie, "Content-Type": "application/json" },
+        body: JSON.stringify(updatedSettings),
+      });
+      assert.equal(updateResponse.status, 200);
+      assert.equal((await updateResponse.json()).zones[0].fee, 3.25);
+      assert.equal(settingsRepository.getDeliverySettings().epsPickupFee, 2.75);
+    } finally {
+      await close(settingsServer);
+      settingsRepository.close();
+    }
   });
 
   describe("repositorio SQLite", () => {
@@ -446,9 +497,9 @@ describe("API inicial", () => {
     const address = {
       name: credentials.name,
       street: "123 Calle Principal",
-      city: "Ciudad",
-      region: "Estado",
-      municipality: "Municipio",
+      city: "Santo Domingo Este",
+      region: "Santo Domingo",
+      municipality: "Santo Domingo Este",
       sector: "Sector",
       postalCode: "12345",
       phone: credentials.phone,
@@ -537,7 +588,10 @@ describe("API inicial", () => {
       }),
     });
     assert.equal(invalidEpsLocationResponse.status, 400);
-    assert.equal(order.total, product.price * 2);
+    assert.equal(order.subtotal, product.price * 2);
+    assert.equal(order.shippingCost, 3);
+    assert.equal(order.deliveryZone.id, "zone-1");
+    assert.equal(order.total, product.price * 2 + 3);
     assert.equal(order.items[0].unitPrice, product.price);
     assert.equal(repository.getCatalog().products[0].stock, product.stock);
     const deletePendingProductResponse = await fetch(`${apiUrl}/api/products/${product.id}`, {

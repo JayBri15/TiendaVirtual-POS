@@ -214,6 +214,14 @@ function isOrder(order) {
     typeof order.customerName === "string" &&
     shippingAddress &&
     typeof shippingAddress.name === "string" &&
+    Number.isFinite(order.subtotal) &&
+    order.subtotal >= 0 &&
+    Number.isFinite(order.shippingCost) &&
+    order.shippingCost >= 0 &&
+    (order.deliveryZone === null ||
+      (order.deliveryZone &&
+        typeof order.deliveryZone.id === "string" &&
+        typeof order.deliveryZone.name === "string")) &&
     (shippingAddress.deliveryMethod === undefined ||
       shippingAddress.deliveryMethod === "address" ||
       shippingAddress.deliveryMethod === "eps") &&

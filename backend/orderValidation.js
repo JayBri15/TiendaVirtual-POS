@@ -1,4 +1,5 @@
 import { EPS_LOCATIONS } from "../shared/epsLocations.js";
+import { quoteDelivery } from "../shared/deliverySettings.js";
 
 /**
  * Error de validación que la API devuelve como HTTP 400.
@@ -14,8 +15,9 @@ export class OrderValidationError extends Error {
  * Valida los datos de entrega y líneas de un pedido de cliente.
  * No acepta precios: el servidor toma el importe actual del catálogo.
  * @param {unknown} value Cuerpo JSON recibido.
+ * @param {object} deliverySettings Tarifas y cobertura vigentes del servidor.
  */
-export function validateOrderRequest(value) {
+export function validateOrderRequest(value, deliverySettings) {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new OrderValidationError("El cuerpo debe ser un objeto de pedido.");
   }
@@ -35,7 +37,7 @@ export function validateOrderRequest(value) {
   let epsLocation = null;
   if (deliveryMethod === "eps") {
     epsLocation = EPS_LOCATIONS.find((location) => location.id === value.epsLocationId);
-    if (!epsLocation) {
+    if (!epsLocation || !deliverySettings.availableEpsLocationIds.includes(epsLocation.id)) {
       throw new OrderValidationError("Selecciona una sucursal EPS válida.");
     }
     normalizedAddress = {
@@ -60,6 +62,12 @@ export function validateOrderRequest(value) {
       postalCode: requiredText(address.postalCode, "El código postal", 20),
     };
   }
+  const quote = quoteDelivery(deliverySettings, deliveryMethod, normalizedAddress);
+  if (!quote) {
+    throw new OrderValidationError(
+      "No hay una zona de entrega asignada para esta ubicación. Contacta al administrador."
+    );
+  }
   if (
     !Array.isArray(value.items) ||
     value.items.length === 0 ||
@@ -83,6 +91,8 @@ export function validateOrderRequest(value) {
     address: normalizedAddress,
     deliveryMethod,
     epsLocation,
+    shippingCost: quote.fee,
+    deliveryZone: quote.zone,
     saveAsAlternate: deliveryMethod === "address" && value.saveAsAlternate === true,
     items: value.items.map(({ productId, quantity }) => ({ productId, quantity })),
   };

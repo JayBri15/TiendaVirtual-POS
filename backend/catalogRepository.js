@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_CATEGORIES, DEFAULT_PRODUCTS } from "../src/JS/data/defaultCatalog.js";
 import { getProductDetails } from "../src/JS/data/productDetails.js";
+import { DEFAULT_DELIVERY_SETTINGS } from "../shared/deliverySettings.js";
 
 const backendDirectory = dirname(fileURLToPath(import.meta.url));
 const defaultDatabasePath = join(backendDirectory, "data", "store.sqlite");
@@ -46,6 +47,8 @@ export class StoreOperationError extends Error {
  *   voidSale: (saleId: string) => import("../src/JS/models.js").Sale,
  *   createOrder: (customerId: string, request: {address: object, items: Array<{productId: string, quantity: number}>}) => import("../src/JS/models.js").Order,
  *   getOrders: () => import("../src/JS/models.js").Order[],
+ *   getDeliverySettings: () => object,
+ *   updateDeliverySettings: (settings: object) => object,
  *   confirmOrder: (orderId: string) => import("../src/JS/models.js").Order,
  *   cancelOrder: (orderId: string) => import("../src/JS/models.js").Order,
  *   hasActiveFulfillmentForProduct: (productId: string) => boolean,
@@ -115,6 +118,11 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
       PRIMARY KEY (customer_id, address_type)
     );
 
+    CREATE TABLE IF NOT EXISTS store_settings (
+      setting_key TEXT PRIMARY KEY,
+      value_json TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS login_attempts (
       scope TEXT NOT NULL,
       ip TEXT NOT NULL,
@@ -160,6 +168,9 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
       delivery_method TEXT NOT NULL DEFAULT 'address',
       eps_location_id TEXT NOT NULL DEFAULT '',
       eps_location_name TEXT NOT NULL DEFAULT '',
+      shipping_cost REAL NOT NULL DEFAULT 0 CHECK (shipping_cost >= 0),
+      delivery_zone_id TEXT NOT NULL DEFAULT '',
+      delivery_zone_name TEXT NOT NULL DEFAULT '',
       total REAL NOT NULL CHECK (total >= 0),
       status TEXT NOT NULL CHECK (status IN ('pending', 'confirmed', 'cancelled')),
       stock_deducted INTEGER NOT NULL DEFAULT 0 CHECK (stock_deducted IN (0, 1)),
@@ -181,6 +192,9 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
   migrateCategoryColumns(database);
   migrateCustomerCredentialColumns(database);
   migrateOrderAddressColumns(database);
+  database
+    .prepare("INSERT OR IGNORE INTO store_settings (setting_key, value_json) VALUES (?, ?)")
+    .run("delivery", JSON.stringify(DEFAULT_DELIVERY_SETTINGS));
   const productCount = database.prepare("SELECT COUNT(*) AS count FROM products").get().count;
   if (productCount === 0) seedCatalog(database);
 
@@ -214,6 +228,8 @@ export function createCatalogRepository(databasePath = defaultDatabasePath) {
     createOrder: (customerId, order) => createOrder(database, customerId, order),
     getCustomerAddresses: (customerId) => getCustomerAddresses(database, customerId),
     getOrders: () => readOrders(database),
+    getDeliverySettings: () => getDeliverySettings(database),
+    updateDeliverySettings: (settings) => updateDeliverySettings(database, settings),
     confirmOrder: (orderId) => confirmOrder(database, orderId),
     cancelOrder: (orderId) => cancelOrder(database, orderId),
     hasActiveFulfillmentForProduct: (productId) =>
@@ -295,6 +311,15 @@ function migrateOrderAddressColumns(database) {
   }
   if (!columns.has("eps_location_name")) {
     database.exec("ALTER TABLE orders ADD COLUMN eps_location_name TEXT NOT NULL DEFAULT ''");
+  }
+  if (!columns.has("shipping_cost")) {
+    database.exec("ALTER TABLE orders ADD COLUMN shipping_cost REAL NOT NULL DEFAULT 0");
+  }
+  if (!columns.has("delivery_zone_id")) {
+    database.exec("ALTER TABLE orders ADD COLUMN delivery_zone_id TEXT NOT NULL DEFAULT ''");
+  }
+  if (!columns.has("delivery_zone_name")) {
+    database.exec("ALTER TABLE orders ADD COLUMN delivery_zone_name TEXT NOT NULL DEFAULT ''");
   }
 }
 
@@ -850,7 +875,7 @@ function hasActiveFulfillmentForProduct(database, productId) {
  * Registra un pedido pendiente con precios y nombres actuales, sin reservar stock.
  * @param {import("node:sqlite").DatabaseSync} database Conexión SQLite abierta.
  * @param {string} customerId Cuenta que inició sesión.
- * @param {{address: object, deliveryMethod: string, epsLocation: object|null, items: Array<{productId: string, quantity: number}>}} request Solicitud validada.
+ * @param {{address: object, deliveryMethod: string, epsLocation: object|null, shippingCost: number, deliveryZone: object|null, items: Array<{productId: string, quantity: number}>}} request Solicitud validada.
  */
 function createOrder(database, customerId, request) {
   database.exec("BEGIN");
@@ -888,14 +913,18 @@ function createOrder(database, customerId, request) {
       total += product.price * line.quantity;
     }
 
+    const subtotal = total;
     const order = {
       id: `order-${randomUUID()}`,
       date: new Date().toISOString(),
       customerId: customer.id,
       customerName: customer.name,
       shippingAddress: { ...request.address },
+      subtotal,
+      shippingCost: request.shippingCost,
+      deliveryZone: request.deliveryZone,
       items: orderItems,
-      total,
+      total: subtotal + request.shippingCost,
       status: "pending",
     };
     const savedAddresses = getCustomerAddresses(database, customerId);
@@ -910,8 +939,8 @@ function createOrder(database, customerId, request) {
         `INSERT INTO orders (
            id, date, customer_id, customer_name, recipient_name, street, city, region,
            municipality, sector, postal_code, phone, delivery_method, eps_location_id,
-           eps_location_name, total, status
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           eps_location_name, shipping_cost, delivery_zone_id, delivery_zone_name, total, status
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         order.id,
@@ -929,6 +958,9 @@ function createOrder(database, customerId, request) {
         request.deliveryMethod,
         request.epsLocation?.id || "",
         request.epsLocation?.name || "",
+        request.shippingCost,
+        request.deliveryZone?.id || "",
+        request.deliveryZone?.name || "",
         order.total,
         order.status
       );
@@ -1055,6 +1087,22 @@ function getCustomerAddresses(database, customerId) {
   };
 }
 
+function getDeliverySettings(database) {
+  const row = database
+    .prepare("SELECT value_json FROM store_settings WHERE setting_key = 'delivery'")
+    .get();
+  if (!row)
+    throw new StoreOperationError("DELIVERY_SETTINGS_MISSING", "Faltan ajustes de entrega.");
+  return JSON.parse(row.value_json);
+}
+
+function updateDeliverySettings(database, settings) {
+  database
+    .prepare("UPDATE store_settings SET value_json = ? WHERE setting_key = 'delivery'")
+    .run(JSON.stringify(settings));
+  return settings;
+}
+
 function withoutAddressType({ type: _type, ...address }) {
   return address;
 }
@@ -1098,6 +1146,8 @@ function readOrders(database) {
               recipient_name AS recipientName, street, city, region, municipality, sector,
               postal_code AS postalCode, phone, delivery_method AS deliveryMethod,
               eps_location_id AS epsLocationId, eps_location_name AS epsLocationName, total, status,
+              shipping_cost AS shippingCost, delivery_zone_id AS deliveryZoneId,
+              delivery_zone_name AS deliveryZoneName,
               confirmed_at AS confirmedAt, cancelled_at AS cancelledAt
        FROM orders ORDER BY date DESC, rowid DESC`
     )
@@ -1106,39 +1156,50 @@ function readOrders(database) {
     `SELECT product_id AS productId, name, sku, unit_price AS unitPrice, quantity
      FROM order_items WHERE order_id = ? ORDER BY rowid`
   );
-  return orders.map((order) => ({
-    id: order.id,
-    date: order.date,
-    customerId: order.customerId,
-    customerName: order.customerName,
-    shippingAddress: {
-      name: order.recipientName,
-      street: order.street,
-      city: order.city,
-      region: order.region,
-      municipality: order.municipality,
-      sector: order.sector,
-      postalCode: order.postalCode,
-      phone: order.phone,
-      ...(order.deliveryMethod === "eps"
-        ? {
-            deliveryMethod: "eps",
-            epsLocation: {
-              id: order.epsLocationId,
-              name: order.epsLocationName,
-              address: order.street,
-              city: order.city,
-              region: order.region,
-            },
-          }
-        : {}),
-    },
-    items: getItems.all(order.id),
-    total: order.total,
-    status: order.status,
-    ...(order.confirmedAt ? { confirmedAt: order.confirmedAt } : {}),
-    ...(order.cancelledAt ? { cancelledAt: order.cancelledAt } : {}),
-  }));
+  return orders.map((order) => {
+    const items = getItems.all(order.id);
+    return {
+      id: order.id,
+      date: order.date,
+      customerId: order.customerId,
+      customerName: order.customerName,
+      shippingAddress: {
+        name: order.recipientName,
+        street: order.street,
+        city: order.city,
+        region: order.region,
+        municipality: order.municipality,
+        sector: order.sector,
+        postalCode: order.postalCode,
+        phone: order.phone,
+        ...(order.deliveryMethod === "eps"
+          ? {
+              deliveryMethod: "eps",
+              epsLocation: {
+                id: order.epsLocationId,
+                name: order.epsLocationName,
+                address: order.street,
+                city: order.city,
+                region: order.region,
+              },
+            }
+          : {}),
+      },
+      items,
+      subtotal:
+        items.length > 0
+          ? items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0)
+          : Math.max(0, order.total - order.shippingCost),
+      shippingCost: order.shippingCost,
+      deliveryZone: order.deliveryZoneId
+        ? { id: order.deliveryZoneId, name: order.deliveryZoneName }
+        : null,
+      total: order.total,
+      status: order.status,
+      ...(order.confirmedAt ? { confirmedAt: order.confirmedAt } : {}),
+      ...(order.cancelledAt ? { cancelledAt: order.cancelledAt } : {}),
+    };
+  });
 }
 
 /**

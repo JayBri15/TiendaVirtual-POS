@@ -7,7 +7,9 @@ import {
   readCustomerSession,
 } from "../services/customerApi.js";
 import { getProvinceMunicipalities, PROVINCES } from "dominican-republic-geodata";
+import { quoteDelivery } from "../../../shared/deliverySettings.js";
 import { EPS_LOCATIONS } from "../../../shared/epsLocations.js";
+import { readDeliverySettings } from "../services/deliveryApi.js";
 import { money } from "../shared/format.js";
 import { Brand, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
@@ -30,7 +32,7 @@ const steps = [
 /**
  * Resume el importe de los productos. El backend calculará el valor final al recibir el pedido.
  */
-function SummaryCard({ items, subtotal }) {
+function SummaryCard({ items, subtotal, shippingCost = null }) {
   return (
     <aside className="card h-max p-5 sm:p-6">
       <h2 className="font-display text-xl">Resumen del pedido</h2>
@@ -41,12 +43,14 @@ function SummaryCard({ items, subtotal }) {
         </div>
         <div className="flex justify-between">
           <dt className="text-muted">Envío</dt>
-          <dd>Por confirmar</dd>
+          <dd>{shippingCost === null ? "Por calcular" : money(shippingCost)}</dd>
         </div>
       </dl>
       <div className="mt-5 flex justify-between border-t border-line pt-5">
         <strong>Total estimado</strong>
-        <strong className="text-lg">{money(subtotal)}</strong>
+        <strong className="text-lg">
+          {shippingCost === null ? "Por calcular" : money(subtotal + shippingCost)}
+        </strong>
       </div>
       <p className="mt-4 rounded bg-paper p-3 text-xs leading-5 text-muted">
         Este pedido no genera un cobro ni reserva existencias. Admin confirmará la disponibilidad
@@ -66,6 +70,8 @@ export function Checkout() {
   const [cart, setCart] = useState([]);
   const [customerStatus, setCustomerStatus] = useState("checking");
   const [customer, setCustomer] = useState(null);
+  const [deliverySettings, setDeliverySettings] = useState(null);
+  const [deliverySettingsStatus, setDeliverySettingsStatus] = useState("loading");
   const [customerAddresses, setCustomerAddresses] = useState({ primary: null, alternate: null });
   const [addressChoice, setAddressChoice] = useState("primary");
   const [epsLocationId, setEpsLocationId] = useState("");
@@ -94,6 +100,12 @@ export function Checkout() {
     return province ? getProvinceMunicipalities(province.id) : [];
   }, [address.region]);
   const selectedEpsLocation = EPS_LOCATIONS.find((location) => location.id === epsLocationId);
+  const deliveryMethod = addressChoice === "eps" ? "eps" : "address";
+  const deliveryQuote =
+    deliverySettings &&
+    (deliveryMethod !== "eps" || deliverySettings.availableEpsLocationIds.includes(epsLocationId))
+      ? quoteDelivery(deliverySettings, deliveryMethod, address)
+      : null;
 
   const refreshCatalog = useCallback(async () => {
     setCatalogStatus("loading");
@@ -135,10 +147,22 @@ export function Checkout() {
     }
   }, []);
 
+  const refreshDeliverySettings = useCallback(async () => {
+    setDeliverySettingsStatus("loading");
+    try {
+      setDeliverySettings(await readDeliverySettings());
+      setDeliverySettingsStatus("ready");
+    } catch (error) {
+      console.error("No se pudieron leer las tarifas de entrega.", error);
+      setDeliverySettingsStatus("error");
+    }
+  }, []);
+
   useEffect(() => {
     refreshCatalog();
     refreshCustomerSession();
-  }, [refreshCatalog, refreshCustomerSession]);
+    refreshDeliverySettings();
+  }, [refreshCatalog, refreshCustomerSession, refreshDeliverySettings]);
 
   const handleStorageChange = useCallback(
     (event) => {
@@ -346,10 +370,22 @@ export function Checkout() {
                 </span>
               </div>
             )}
-            <div className="mt-6 flex justify-center gap-8 text-sm">
-              <span>{order.items.reduce((count, item) => count + item.quantity, 0)} artículos</span>
-              <strong>{money(order.total)}</strong>
-            </div>
+            <dl className="mx-auto mt-6 grid max-w-sm gap-2 text-sm">
+              <div className="flex justify-between">
+                <dt>Productos</dt>
+                <dd>{money(order.subtotal)}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt>Envío</dt>
+                <dd>{money(order.shippingCost)}</dd>
+              </div>
+              <div className="mt-2 flex justify-between border-t border-line pt-3 font-semibold">
+                <dt>
+                  {order.items.reduce((count, item) => count + item.quantity, 0)} artículos · Total
+                </dt>
+                <dd>{money(order.total)}</dd>
+              </div>
+            </dl>
             <a href="./#inicio" className="btn-primary mt-8">
               Volver a la tienda
             </a>
@@ -604,7 +640,9 @@ export function Checkout() {
                             onChange={(event) => setEpsLocationId(event.target.value)}
                           >
                             <option value="">Selecciona una sucursal</option>
-                            {EPS_LOCATIONS.map((location) => (
+                            {EPS_LOCATIONS.filter((location) =>
+                              deliverySettings?.availableEpsLocationIds.includes(location.id)
+                            ).map((location) => (
                               <option key={location.id} value={location.id}>
                                 {location.name} — {location.city}, {location.region}
                               </option>
@@ -614,6 +652,33 @@ export function Checkout() {
                             <p className="mt-2 text-sm text-muted">{selectedEpsLocation.address}</p>
                           )}
                         </div>
+                      )}
+                      {deliverySettingsStatus === "error" && (
+                        <p className="mt-4 text-sm text-[#9d5144]" role="alert">
+                          No se pudieron cargar las tarifas. Vuelve a cargar la página o contacta al
+                          administrador.
+                        </p>
+                      )}
+                      {deliverySettingsStatus === "ready" && !deliveryQuote && (
+                        <p
+                          className="mt-4 rounded bg-[#fff4e5] p-3 text-sm text-[#8c5727]"
+                          role="alert"
+                        >
+                          {deliveryMethod === "eps"
+                            ? !epsLocationId
+                              ? "Selecciona una sucursal EPS para calcular el costo de retiro."
+                              : "La sucursal seleccionada ya no está disponible. Elige otra o contacta al administrador."
+                            : !address.region || !address.municipality
+                              ? "Selecciona la provincia y el municipio para calcular el envío."
+                              : "Esta ubicación no tiene una zona de entrega asignada. Contacta al administrador para revisar la cobertura."}
+                        </p>
+                      )}
+                      {deliveryQuote && (
+                        <p className="mt-4 rounded bg-[#eff2e7] p-3 text-sm text-leaf">
+                          {deliveryQuote.zone
+                            ? `${deliveryQuote.zone.name} · envío ${money(deliveryQuote.fee)}`
+                            : `Retiro en sucursal EPS · ${money(deliveryQuote.fee)}`}
+                        </p>
                       )}
                       {(addressChoice === "alternate" ||
                         (!customerAddresses.primary && addressChoice !== "eps")) && (
@@ -764,13 +829,21 @@ export function Checkout() {
                         >
                           ← Volver al resumen
                         </button>
-                        <button className="btn-primary" type="submit" disabled={busy}>
+                        <button
+                          className="btn-primary"
+                          type="submit"
+                          disabled={busy || deliverySettingsStatus !== "ready" || !deliveryQuote}
+                        >
                           {busy ? "Guardando pedido..." : "Crear pedido"}{" "}
                           <span aria-hidden="true">→</span>
                         </button>
                       </div>
                     </form>
-                    <SummaryCard items={items} subtotal={subtotal} />
+                    <SummaryCard
+                      items={items}
+                      subtotal={subtotal}
+                      shippingCost={deliveryQuote?.fee ?? null}
+                    />
                   </div>
                 )}
               </>
