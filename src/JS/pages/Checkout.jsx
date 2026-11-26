@@ -11,7 +11,7 @@ import { quoteDelivery } from "../../../shared/deliverySettings.js";
 import { EPS_LOCATIONS } from "../../../shared/epsLocations.js";
 import { readDeliverySettings } from "../services/deliveryApi.js";
 import { money } from "../shared/format.js";
-import { Brand, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
+import { Brand, SelectMenu, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
 const emptyAddress = {
   name: "",
@@ -213,10 +213,22 @@ export function Checkout() {
   const createOrder = async (event) => {
     event.preventDefault();
     if (!customer || busy || items.length === 0) return;
+    const isEpsPickup = addressChoice === "eps";
+    if (isEpsPickup && !epsLocationId) {
+      setErrorMessage("Selecciona una sucursal EPS antes de continuar.");
+      document.getElementById("checkout-eps-location")?.focus();
+      return;
+    }
+    if (!isEpsPickup && (!address.region || !address.municipality)) {
+      setErrorMessage("Selecciona la provincia y el municipio de entrega.");
+      document
+        .getElementById(address.region ? "checkout-municipality" : "checkout-region")
+        ?.focus();
+      return;
+    }
     setBusy(true);
     setErrorMessage("");
     try {
-      const isEpsPickup = addressChoice === "eps";
       const savedOrder = await createCustomerOrder({
         address: isEpsPickup ? { name: address.name, phone: address.phone } : address,
         deliveryMethod: isEpsPickup ? "eps" : "address",
@@ -654,22 +666,24 @@ export function Checkout() {
                           <label className="label" htmlFor="checkout-eps-location">
                             Sucursal EPS
                           </label>
-                          <select
+                          <SelectMenu
                             id="checkout-eps-location"
-                            className="input"
                             value={epsLocationId}
                             required
-                            onChange={(event) => setEpsLocationId(event.target.value)}
-                          >
-                            <option value="">Selecciona una sucursal</option>
-                            {EPS_LOCATIONS.filter((location) =>
+                            placeholder="Selecciona una sucursal"
+                            searchPlaceholder="Buscar sucursal por nombre o ubicación..."
+                            options={EPS_LOCATIONS.filter((location) =>
                               deliverySettings?.availableEpsLocationIds.includes(location.id)
-                            ).map((location) => (
-                              <option key={location.id} value={location.id}>
-                                {location.name} — {location.city}, {location.region}
-                              </option>
-                            ))}
-                          </select>
+                            ).map((location) => ({
+                              value: location.id,
+                              label: location.name,
+                              detail: `${location.city}, ${location.region} · ${location.address}`,
+                            }))}
+                            onChange={(value) => {
+                              setEpsLocationId(value);
+                              setErrorMessage("");
+                            }}
+                          />
                           {selectedEpsLocation && (
                             <p className="mt-2 text-sm text-muted">{selectedEpsLocation.address}</p>
                           )}
@@ -725,54 +739,51 @@ export function Checkout() {
                                 {label}
                               </label>
                               {field === "region" ? (
-                                <select
+                                <SelectMenu
                                   id="checkout-region"
-                                  className="input"
-                                  autoComplete="address-level1"
                                   value={address.region}
                                   required
-                                  onChange={(event) =>
+                                  placeholder="Selecciona una provincia"
+                                  searchPlaceholder="Buscar provincia..."
+                                  options={PROVINCES.toSorted((a, b) =>
+                                    a.name.localeCompare(b.name, "es")
+                                  ).map((province) => ({
+                                    value: province.name,
+                                    label: province.name,
+                                  }))}
+                                  onChange={(value) => {
                                     setAddress((current) => ({
                                       ...current,
-                                      region: event.target.value,
+                                      region: value,
                                       municipality: "",
-                                    }))
-                                  }
-                                >
-                                  <option value="">Selecciona una provincia</option>
-                                  {PROVINCES.toSorted((a, b) =>
-                                    a.name.localeCompare(b.name, "es")
-                                  ).map((province) => (
-                                    <option key={province.id} value={province.name}>
-                                      {province.name}
-                                    </option>
-                                  ))}
-                                </select>
+                                    }));
+                                    setErrorMessage("");
+                                  }}
+                                />
                               ) : field === "municipality" ? (
-                                <select
+                                <SelectMenu
                                   id="checkout-municipality"
-                                  className="input"
                                   value={address.municipality}
                                   required
                                   disabled={!address.region}
-                                  onChange={(event) =>
+                                  placeholder={
+                                    address.region
+                                      ? "Selecciona un municipio"
+                                      : "Primero selecciona una provincia"
+                                  }
+                                  searchPlaceholder="Buscar municipio..."
+                                  options={municipalities.map((municipality) => ({
+                                    value: municipality.name,
+                                    label: municipality.name,
+                                  }))}
+                                  onChange={(value) => {
                                     setAddress((current) => ({
                                       ...current,
-                                      municipality: event.target.value,
-                                    }))
-                                  }
-                                >
-                                  <option value="">
-                                    {address.region
-                                      ? "Selecciona un municipio"
-                                      : "Primero selecciona una provincia"}
-                                  </option>
-                                  {municipalities.map((municipality) => (
-                                    <option key={municipality.id} value={municipality.name}>
-                                      {municipality.name}
-                                    </option>
-                                  ))}
-                                </select>
+                                      municipality: value,
+                                    }));
+                                    setErrorMessage("");
+                                  }}
+                                />
                               ) : (
                                 <input
                                   id={`checkout-${field}`}

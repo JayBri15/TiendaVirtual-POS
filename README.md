@@ -24,6 +24,7 @@ Tienda online con catálogo, checkout y panel de administración. La aplicación
 - 🧾 Panel Admin para gestionar productos, categorías, clientes, ventas, pedidos y tarifas de envío.
 - 💾 Persistencia SQLite para catálogo, cuentas, ventas y pedidos.
 - 📱 Vistas de tienda, checkout y administración dentro de una aplicación React.
+- 🌗 Tema claro y oscuro alternable, con preferencia guardada en el navegador.
 
 El formulario de entrega usa los datos territoriales de provincias y municipios de [`dominican-republic-geodata`](https://www.npmjs.com/package/dominican-republic-geodata), basados en la División Territorial 2021 de la Oficina Nacional de Estadística (ONE). El país es República Dominicana; provincia y municipio se eligen de listas encadenadas, mientras ciudad, sector y calle se capturan por separado. El cliente puede elegir una sucursal EPS disponible en `shared/epsLocations.js`; el servidor valida y guarda la sucursal elegida con el pedido.
 

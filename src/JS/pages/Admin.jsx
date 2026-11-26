@@ -33,14 +33,14 @@ import { makeId, money } from "../shared/format.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails, getRecommendedProducts } from "../data/productDetails.js";
 import { ProductDetail } from "../shared/ProductDetail.jsx";
-import { Brand, Field, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
+import { Brand, Field, SelectMenu, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 import { getProvinceMunicipalities, PROVINCES } from "dominican-republic-geodata";
 import { EPS_LOCATIONS } from "../../../shared/epsLocations.js";
 import { readAdminDeliverySettings, updateAdminDeliverySettings } from "../services/deliveryApi.js";
 
 /** Reglas de negocio usadas por las operaciones del portal Admin. */
 const LOW_STOCK = 5;
-const PAYMENT_METHODS = ["Efectivo", "Tarjeta (registro demo)", "Transferencia (registro demo)"];
+const PAYMENT_METHODS = ["Efectivo", "Tarjeta"];
 const NAVIGATION = [
   ["dashboard", "▦", "Resumen"],
   ["pos", "▣", "Punto de venta"],
@@ -56,11 +56,20 @@ const NAVIGATION = [
 
 function SalesTrendChart({ days, onNavigate }) {
   const [hoveredDay, setHoveredDay] = useState(null);
+  const activeDay = days.find((day) => day.key === hoveredDay);
+  const activeDayIndex = days.findIndex((day) => day.key === hoveredDay);
   const maxRevenue = Math.max(1, ...days.map((day) => day.revenue));
   const hasSales = days.some((day) => day.revenue > 0);
+  const activeBarHeight =
+    activeDay && activeDay.revenue > 0 ? (activeDay.revenue / maxRevenue) * 128 : 2;
+  const tooltipTop = activeDay
+    ? Math.max(36, Math.min(190, 36 + ((170 - activeBarHeight / 2) * 224) / 220 - 40))
+    : 36;
+  const tooltipLeftPercent =
+    activeDayIndex >= 0 ? ((43 + activeDayIndex * 98 + 42) / 700) * 100 : 0;
 
   return (
-    <figure>
+    <figure className="relative">
       <figcaption className="mb-4 text-sm text-muted">
         Ingresos de ventas completadas por día
       </figcaption>
@@ -97,7 +106,6 @@ function SalesTrendChart({ days, onNavigate }) {
                 onFocus={() => setHoveredDay(day.key)}
                 onBlur={() => setHoveredDay(null)}
               >
-                <title>{`${day.label}: ${money(day.revenue)} (${day.count} transacciones). Abrir ventas.`}</title>
                 <rect
                   x={x}
                   y={y}
@@ -128,18 +136,47 @@ function SalesTrendChart({ days, onNavigate }) {
           No hay ventas completadas en los últimos 7 días.
         </p>
       )}
+      {activeDay && (
+        <div
+          className="pointer-events-none absolute z-10 w-48 rounded-lg border border-line bg-white p-3 text-xs shadow-lg"
+          role="status"
+          aria-live="polite"
+          style={{
+            left: `min(calc(${tooltipLeftPercent}% + 8px), calc(100% - 12rem))`,
+            top: `${tooltipTop}px`,
+          }}
+        >
+          <strong className="block text-sm text-ink">{activeDay.label}</strong>
+          <dl className="mt-2 grid gap-1.5">
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Ingresos</dt>
+              <dd className="font-semibold">{money(activeDay.revenue)}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Ventas</dt>
+              <dd className="font-semibold">{activeDay.count}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-muted">Promedio por venta</dt>
+              <dd className="font-semibold">
+                {money(activeDay.count ? activeDay.revenue / activeDay.count : 0)}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      )}
     </figure>
   );
 }
 
 function MonthlySalesChart({ revenue, comparison, salesByPaymentMethod, saleCount }) {
   const [activeMethod, setActiveMethod] = useState(null);
-  const radius = 58;
+  const radius = 65;
   const circumference = 2 * Math.PI * radius;
   const colors = ["#25483b", "#9cad42", "#6f9c84", "#c9785b", "#7d789f"];
   const activePaymentMethod = salesByPaymentMethod.find((item) => item.name === activeMethod);
   let offset = 0;
-  const centerLabel = money(revenue);
+  const centerLabel = money(revenue).replace(/^USD\s?/, "$");
 
   return (
     <figure className="relative flex flex-col items-center justify-center self-start py-2">
@@ -151,7 +188,7 @@ function MonthlySalesChart({ revenue, comparison, salesByPaymentMethod, saleCoun
           role="img"
           aria-label={`Ingresos del mes: ${centerLabel}. Distribución por método de pago: ${salesByPaymentMethod.map((item) => `${item.name}, ${item.count} ventas, ${money(item.revenue)}`).join("; ") || "sin ventas"}.`}
         >
-          <circle cx="80" cy="80" r={radius} fill="none" stroke="#e8e9e2" strokeWidth="22" />
+          <circle cx="80" cy="80" r={radius} fill="none" stroke="#e8e9e2" strokeWidth="30" />
           {salesByPaymentMethod.map((item, index) => {
             const length = (item.count / saleCount) * circumference;
             const isActive = item.name === activeMethod;
@@ -196,7 +233,7 @@ function MonthlySalesChart({ revenue, comparison, salesByPaymentMethod, saleCoun
             y="86"
             textAnchor="middle"
             fill="#1b2923"
-            fontSize={centerLabel.length > 10 ? "13" : "16"}
+            fontSize={centerLabel.length > 10 ? "20" : "25"}
             fontWeight="700"
           >
             {centerLabel}
@@ -1868,12 +1905,64 @@ export function Admin() {
       .slice(0, 5);
     const maxUnitsSold = Math.max(1, ...bestSellers.map((item) => item.quantity));
     const pendingOrders = orders.filter((order) => order.status === "pending").length;
+    const recentActivities = [
+      ...data.sales.map((sale) => ({
+        ...sale,
+        date: sale.voidedAt || sale.date,
+        key: `sale-${sale.id}`,
+        type: "Venta",
+        customer: sale.customerName || "Venta de mostrador",
+        statusLabel: sale.status === "voided" ? "Anulada" : "Completada",
+        amountSign: sale.status === "voided" ? "-" : "+",
+        amountClass:
+          sale.status === "voided"
+            ? "dashboard-activity-cancel font-semibold text-[#a33c32]"
+            : "dashboard-activity-income font-semibold text-[#28623c]",
+        statusClass:
+          sale.status === "voided" ? "bg-[#fbe9e7] text-[#a33c32]" : "bg-[#e7f2e8] text-[#28623c]",
+      })),
+      ...orders.map((order) => ({
+        ...order,
+        date: order.cancelledAt || order.confirmedAt || order.date,
+        key: `order-${order.id}`,
+        type: "Pedido",
+        customer: order.customerName,
+        statusLabel:
+          order.status === "pending"
+            ? "Pendiente de confirmar"
+            : order.status === "confirmed"
+              ? "Confirmado"
+              : "Cancelado",
+        amountSign: order.status === "pending" ? "" : order.status === "confirmed" ? "+" : "-",
+        amountClass:
+          order.status === "pending"
+            ? ""
+            : order.status === "confirmed"
+              ? "dashboard-activity-income font-semibold text-[#28623c]"
+              : "dashboard-activity-cancel font-semibold text-[#a33c32]",
+        statusClass:
+          order.status === "pending"
+            ? "bg-[#fff4d6] text-[#8a5a00]"
+            : order.status === "confirmed"
+              ? "bg-[#e7f2e8] text-[#28623c]"
+              : "bg-[#fbe9e7] text-[#a33c32]",
+      })),
+    ]
+      .sort((left, right) => new Date(right.date) - new Date(left.date))
+      .slice(0, 5);
     const metrics = [
       { type: "monthlySales" },
       {
         label: "Ventas de hoy",
-        value: todaySales.length,
-        foot: `${money(todaySales.reduce((sum, sale) => sum + sale.total, 0))} en ingresos`,
+        value: money(todaySales.reduce((sum, sale) => sum + sale.total, 0)),
+        foot: (
+          <span>
+            <strong className="bg-[#d9e976] px-1 text-ink">
+              {todaySales.length} {todaySales.length === 1 ? "venta" : "ventas"}
+            </strong>{" "}
+            registradas
+          </span>
+        ),
         icon: "▥",
         destination: "sales",
       },
@@ -1963,7 +2052,9 @@ export function Admin() {
             <h3 className="font-display text-xl">Volumen de ventas</h3>
             <p className="mt-1 text-xs text-muted">
               Promedio por venta este mes:{" "}
-              {money(monthSales.length ? monthRevenue / monthSales.length : 0)}
+              <strong className="bg-[#d9e976] px-1 text-ink">
+                {money(monthSales.length ? monthRevenue / monthSales.length : 0)}
+              </strong>
             </p>
             <div className="mt-4">
               <SalesTrendChart days={trendDays} onNavigate={setActive} />
@@ -2010,21 +2101,34 @@ export function Admin() {
           <section className="card p-5 sm:p-6">
             <h3 className="mb-3 font-display text-xl">Actividad reciente</h3>
             {table(
-              ["Venta", "Fecha", "Cliente", "Total", "Estado"],
-              data.sales
-                .slice()
-                .sort((a, b) => new Date(b.date) - new Date(a.date))
-                .slice(0, 5)
-                .map((sale) => (
-                  <tr key={sale.id}>
-                    <td>{sale.id.slice(-8).toUpperCase()}</td>
-                    <td>{new Date(sale.date).toLocaleDateString("es-MX")}</td>
-                    <td>{sale.customerName || "Venta de mostrador"}</td>
-                    <td>{money(sale.total)}</td>
-                    <td>{sale.status === "voided" ? "Anulada" : "Completada"}</td>
-                  </tr>
-                )),
-              "Aún no hay ventas. Registra una desde el punto de venta."
+              ["Registro", "Fecha", "Cliente", "Total", "Estado"],
+              recentActivities.map((activity) => (
+                <tr className="dashboard-activity-row" key={activity.key}>
+                  <td>
+                    <span className="block font-semibold">
+                      {activity.id.slice(-8).toUpperCase()}
+                    </span>
+                    <span className="block text-xs text-muted">{activity.type}</span>
+                  </td>
+                  <td>{new Date(activity.date).toLocaleDateString("es-MX")}</td>
+                  <td>{activity.customer}</td>
+                  <td className={activity.amountClass}>
+                    {activity.amountSign === "-"
+                      ? `-${money(Math.abs(activity.total))}`
+                      : activity.amountSign === "+"
+                        ? `+${money(Math.abs(activity.total))}`
+                        : money(activity.total)}
+                  </td>
+                  <td>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${activity.statusClass}`}
+                    >
+                      {activity.statusLabel}
+                    </span>
+                  </td>
+                </tr>
+              )),
+              "Aún no hay ventas ni pedidos recientes."
             )}
           </section>
           <section className="card p-5 sm:p-6">
@@ -2450,30 +2554,46 @@ export function Admin() {
             />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
               {posItems.map((product) => (
-                <article className="card p-4" key={product.id}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="text-[.68rem] text-muted">
-                        {product.category} · Stock: {product.stock}
-                      </p>
-                      <h3 className="mt-2 font-semibold">{product.name}</h3>
-                      <p className="mt-1 text-xs text-muted">{product.sku}</p>
+                <button
+                  type="button"
+                  className="card group w-full overflow-hidden text-left transition duration-150 active:scale-[.98] active:bg-[#e9f1e4] hover:-translate-y-0.5 hover:border-[#78905f] hover:shadow-[0_10px_28px_rgba(37,72,59,0.16)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf"
+                  key={product.id}
+                  disabled={!product.stock}
+                  onClick={() => addPos(product.id, 1)}
+                  aria-label={`Agregar ${product.name} a la venta`}
+                >
+                  <img
+                    className="h-36 w-full object-cover"
+                    src={product.image || DEFAULT_PRODUCTS[0].image}
+                    alt={product.name}
+                    loading="lazy"
+                  />
+                  <div className="p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="truncate text-[.68rem] text-muted">{product.category}</p>
+                      <span
+                        className={`shrink-0 rounded-full px-2 py-1 text-[.65rem] font-semibold ${
+                          product.stock <= LOW_STOCK
+                            ? "bg-[#fbe9e7] text-[#a33c32]"
+                            : product.stock <= LOW_STOCK + 5
+                              ? "bg-[#fff4d6] text-[#8a5a00]"
+                              : "bg-[#e7f2e8] text-[#28623c]"
+                        }`}
+                      >
+                        Stock: {product.stock}
+                      </span>
                     </div>
-                    <button
-                      className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-leaf text-xl text-white"
-                      disabled={!product.stock}
-                      onClick={() => addPos(product.id, 1)}
-                      aria-label={`Agregar ${product.name}`}
-                    >
-                      +
-                    </button>
+                    <h3 className="mt-1 min-h-10 font-semibold">{product.name}</h3>
+                    <p className="mt-1 text-xs text-muted">{product.sku}</p>
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <strong>{money(product.price)}</strong>
+                    </div>
                   </div>
-                  <strong className="mt-4 block">{money(product.price)}</strong>
-                </article>
+                </button>
               ))}
             </div>
           </section>
-          <section className="card h-max p-5">
+          <section className="card h-max p-5 xl:sticky xl:top-24 xl:max-h-[calc(100vh-7rem)] xl:self-start xl:overflow-y-auto">
             <h3 className="font-display text-xl">
               Venta actual · {posCart.reduce((sum, line) => sum + line.quantity, 0)} artículos
             </h3>
@@ -2488,29 +2608,68 @@ export function Admin() {
                 if (!product) return null;
                 return (
                   <div key={line.id} className="flex items-center justify-between gap-3 py-3">
-                    <div>
-                      <strong className="text-sm">{product.name}</strong>
-                      <p className="text-xs text-muted">{money(product.price)} c/u</p>
+                    <div className="flex min-w-0 items-center gap-3">
+                      <img
+                        className="h-12 w-12 shrink-0 rounded object-cover"
+                        src={product.image || DEFAULT_PRODUCTS[0].image}
+                        alt=""
+                        loading="lazy"
+                      />
+                      <div className="min-w-0">
+                        <strong className="block truncate text-sm">{product.name}</strong>
+                        <p className="text-xs text-muted">{money(product.price)} c/u</p>
+                      </div>
                     </div>
                     <div className="text-right">
                       <strong className="text-sm">{money(product.price * line.quantity)}</strong>
-                      <div className="mt-1 flex items-center gap-2">
-                        <button className="text-sm" onClick={() => addPos(product.id, -1)}>
+                      <div
+                        className="mt-2 flex items-center justify-end gap-1.5"
+                        aria-label={`Cantidad de ${product.name}`}
+                      >
+                        <button
+                          type="button"
+                          className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-lg font-semibold text-ink transition hover:border-leaf hover:bg-[#eff2e7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf disabled:cursor-not-allowed disabled:opacity-40"
+                          disabled={line.quantity <= 1}
+                          onClick={() => addPos(product.id, -1)}
+                          aria-label={`Reducir cantidad de ${product.name}`}
+                          title="Reducir cantidad"
+                        >
                           −
                         </button>
-                        <span className="text-xs">{line.quantity}</span>
+                        <span
+                          className="min-w-8 text-center text-base font-bold tabular-nums"
+                          aria-live="polite"
+                        >
+                          {line.quantity}
+                        </span>
                         <button
-                          className="text-sm"
+                          type="button"
+                          className="grid h-9 w-9 place-items-center rounded-full border border-line bg-white text-lg font-semibold text-ink transition hover:border-leaf hover:bg-[#eff2e7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf disabled:cursor-not-allowed disabled:opacity-40"
                           disabled={line.quantity >= product.stock}
                           onClick={() => addPos(product.id, 1)}
+                          aria-label={`Aumentar cantidad de ${product.name}`}
+                          title="Aumentar cantidad"
                         >
                           +
                         </button>
                         <button
-                          className="ml-1 text-xs text-[#9d5144]"
+                          type="button"
+                          className="ml-1 grid h-9 w-9 place-items-center rounded-full text-lg text-[#9d5144] transition hover:bg-[#fbe9e7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9d5144]"
                           onClick={() => addPos(product.id, 0)}
+                          aria-label={`Quitar ${product.name} de la venta`}
+                          title="Quitar producto"
                         >
-                          ×
+                          <svg
+                            aria-hidden="true"
+                            className="h-4 w-4"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                          >
+                            <path d="M5 5l14 14M19 5 5 19" />
+                          </svg>
                         </button>
                       </div>
                     </div>
@@ -2518,44 +2677,101 @@ export function Admin() {
                 );
               })}
             </div>
-            <label className="mt-4 block">
-              <span className="label">Cliente (opcional)</span>
-              <select
-                className="input"
+            <div className="mt-4">
+              <label className="label" htmlFor="pos-customer">
+                Cliente (opcional)
+              </label>
+              <SelectMenu
+                id="pos-customer"
                 value={posCustomer}
-                onChange={(event) => setPosCustomer(event.target.value)}
-              >
-                <option value="">Venta de mostrador</option>
-                {data.customers.map((customer) => (
-                  <option key={customer.id} value={customer.id}>
-                    {customer.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="mt-4 block">
-              <span className="label">Método de pago</span>
-              <select
-                className="input"
-                value={posPayment}
-                onChange={(event) => setPosPayment(event.target.value)}
-              >
-                {PAYMENT_METHODS.map((method) => (
-                  <option key={method}>{method}</option>
-                ))}
-              </select>
-            </label>
+                options={[
+                  {
+                    value: "",
+                    label: "Venta de mostrador",
+                    detail: "No asignar un cliente a esta venta",
+                  },
+                  ...data.customers.map((customer) => ({
+                    value: customer.id,
+                    label: customer.name,
+                    detail: customer.email,
+                  })),
+                ]}
+                onChange={setPosCustomer}
+              />
+            </div>
+            <fieldset className="mt-4">
+              <legend className="label mb-2">Método de pago</legend>
+              <div className="grid grid-cols-2 gap-3">
+                {PAYMENT_METHODS.map((method) => {
+                  const isCash = method === PAYMENT_METHODS[0];
+                  const selected = posPayment === method;
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      className={`flex min-h-16 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-sm font-semibold transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-leaf ${
+                        selected
+                          ? "border-leaf bg-leaf text-white shadow-sm"
+                          : "border-line bg-white text-ink hover:border-leaf hover:bg-[#eff2e7]"
+                      }`}
+                      aria-pressed={selected}
+                      onClick={() => setPosPayment(method)}
+                    >
+                      <svg
+                        aria-hidden="true"
+                        className="h-6 w-6 shrink-0"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.7"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        {isCash ? (
+                          <>
+                            <rect x="2.5" y="5" width="19" height="14" rx="2" />
+                            <circle cx="12" cy="12" r="3" />
+                            <path d="M6 9h.01M18 15h.01" />
+                          </>
+                        ) : (
+                          <>
+                            <rect x="2.5" y="4.5" width="19" height="15" rx="2" />
+                            <path d="M2.5 9h19M6 15h4" />
+                          </>
+                        )}
+                      </svg>
+                      {isCash ? "Efectivo" : "Tarjeta"}
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
             <div className="mt-5 flex justify-between border-t border-line pt-4">
               <strong>Total</strong>
-              <strong>{money(totalPos)}</strong>
+              <strong className="rounded bg-[#d9e976] px-2 py-1 text-lg text-ink">
+                {money(totalPos)}
+              </strong>
             </div>
-            <button
-              className="btn-primary mt-4 w-full"
-              disabled={!posCart.length || saleBusy}
-              onClick={completeSale}
-            >
-              {saleBusy ? "Registrando venta…" : "Confirmar venta"}
-            </button>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <button
+                className="btn-secondary w-full"
+                disabled={!posCart.length || saleBusy}
+                onClick={() => {
+                  setPosCart([]);
+                  setPosCustomer("");
+                  setPosPayment(PAYMENT_METHODS[0]);
+                }}
+              >
+                Limpiar pedido
+              </button>
+              <button
+                className="btn-primary w-full"
+                disabled={!posCart.length || saleBusy}
+                onClick={completeSale}
+              >
+                {saleBusy ? "Registrando venta…" : "Confirmar venta"}
+              </button>
+            </div>
           </section>
         </div>
       </>
