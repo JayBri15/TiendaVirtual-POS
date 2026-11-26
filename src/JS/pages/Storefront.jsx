@@ -13,7 +13,7 @@ import {
 } from "../services/customerApi.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails } from "../data/productDetails.js";
-import { money } from "../shared/format.js";
+import { formatPhoneNumber, money } from "../shared/format.js";
 import { ProductDetail } from "../shared/ProductDetail.jsx";
 import {
   Brand,
@@ -618,6 +618,7 @@ function AccountGate({ mode, onBack, onAuthenticated }) {
                     autoComplete="tel"
                     value={phone}
                     onChange={(event) => setPhone(event.target.value)}
+                    onBlur={() => setPhone((current) => formatPhoneNumber(current))}
                     maxLength={40}
                     required
                   />

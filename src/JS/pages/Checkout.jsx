@@ -10,7 +10,7 @@ import { getProvinceMunicipalities, PROVINCES } from "dominican-republic-geodata
 import { quoteDelivery } from "../../../shared/deliverySettings.js";
 import { EPS_LOCATIONS } from "../../../shared/epsLocations.js";
 import { readDeliverySettings } from "../services/deliveryApi.js";
-import { money } from "../shared/format.js";
+import { formatPhoneNumber, money } from "../shared/format.js";
 import { Brand, SelectMenu, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
 
 const emptyAddress = {
@@ -138,7 +138,7 @@ export function Checkout() {
           ...emptyAddress,
           ...(primaryAddress || current),
           name: current.name || primaryAddress?.name || profile.name,
-          phone: current.phone || primaryAddress?.phone || profile.phone,
+          phone: formatPhoneNumber(current.phone || primaryAddress?.phone || profile.phone),
         }));
       }
     } catch (error) {
@@ -591,7 +591,10 @@ export function Checkout() {
                               onChange={() => {
                                 setAddressChoice("primary");
                                 setSaveAlternateAddress(Boolean(customerAddresses.alternate));
-                                setAddress(customerAddresses.primary);
+                                setAddress({
+                                  ...customerAddresses.primary,
+                                  phone: formatPhoneNumber(customerAddresses.primary.phone),
+                                });
                               }}
                             />
                             <span className="text-sm">
@@ -625,7 +628,7 @@ export function Checkout() {
                               setAddress((current) => ({
                                 ...current,
                                 name: current.name || customer.name,
-                                phone: current.phone || customer.phone,
+                                phone: formatPhoneNumber(current.phone || customer.phone),
                               }));
                             }}
                           />
@@ -647,11 +650,16 @@ export function Checkout() {
                           onClick={() => {
                             setAddressChoice("alternate");
                             setAddress(
-                              customerAddresses.alternate || {
-                                ...emptyAddress,
-                                name: customer.name,
-                                phone: customer.phone,
-                              }
+                              customerAddresses.alternate
+                                ? {
+                                    ...customerAddresses.alternate,
+                                    phone: formatPhoneNumber(customerAddresses.alternate.phone),
+                                  }
+                                : {
+                                    ...emptyAddress,
+                                    name: customer.name,
+                                    phone: formatPhoneNumber(customer.phone),
+                                  }
                             );
                           }}
                         >
@@ -793,6 +801,15 @@ export function Checkout() {
                                   value={address[field]}
                                   maxLength={maxLength}
                                   required
+                                  onBlur={
+                                    field === "phone"
+                                      ? () =>
+                                          setAddress((current) => ({
+                                            ...current,
+                                            phone: formatPhoneNumber(current.phone),
+                                          }))
+                                      : undefined
+                                  }
                                   onChange={(event) =>
                                     setAddress((current) => ({
                                       ...current,
@@ -823,6 +840,15 @@ export function Checkout() {
                                 value={address[field]}
                                 maxLength={maxLength}
                                 required
+                                onBlur={
+                                  field === "phone"
+                                    ? () =>
+                                        setAddress((current) => ({
+                                          ...current,
+                                          phone: formatPhoneNumber(current.phone),
+                                        }))
+                                    : undefined
+                                }
                                 onChange={(event) =>
                                   setAddress((current) => ({
                                     ...current,

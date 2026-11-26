@@ -29,11 +29,18 @@ import {
   voidAdminSale,
 } from "../services/adminApi.js";
 import { fetchPublicCatalog } from "../services/catalogApi.js";
-import { makeId, money } from "../shared/format.js";
+import { formatPhoneNumber, makeId, money } from "../shared/format.js";
 import { DEFAULT_PRODUCTS } from "../data/defaultCatalog.js";
 import { getProductDetails, getRecommendedProducts } from "../data/productDetails.js";
 import { ProductDetail } from "../shared/ProductDetail.jsx";
-import { Brand, Field, SelectMenu, useCrossTabStorage, useNotice } from "../shared/ui.jsx";
+import {
+  Brand,
+  Field,
+  SelectMenu,
+  TrashIcon,
+  useCrossTabStorage,
+  useNotice,
+} from "../shared/ui.jsx";
 import { getProvinceMunicipalities, PROVINCES } from "dominican-republic-geodata";
 import { EPS_LOCATIONS } from "../../../shared/epsLocations.js";
 import { readAdminDeliverySettings, updateAdminDeliverySettings } from "../services/deliveryApi.js";
@@ -41,18 +48,150 @@ import { readAdminDeliverySettings, updateAdminDeliverySettings } from "../servi
 /** Reglas de negocio usadas por las operaciones del portal Admin. */
 const LOW_STOCK = 5;
 const PAYMENT_METHODS = ["Efectivo", "Tarjeta"];
-const NAVIGATION = [
-  ["dashboard", "▦", "Resumen"],
-  ["pos", "▣", "Punto de venta"],
-  ["products", "◇", "Productos"],
-  ["inventory", "▤", "Inventario"],
-  ["categories", "▧", "Categorías"],
-  ["customers", "♙", "Clientes"],
-  ["orders", "▣", "Pedidos"],
-  ["shipping", "⌖", "Envíos"],
-  ["sales", "↗", "Ventas"],
-  ["admins", "♧", "Administradores"],
+const ADMIN_GROUPS = [
+  {
+    id: "operations",
+    icon: "↗",
+    label: "Operaciones",
+    modules: [
+      ["pos", "▣", "Punto de venta"],
+      ["orders", "▣", "Pedidos"],
+      ["sales", "↗", "Ventas"],
+    ],
+  },
+  {
+    id: "catalog",
+    icon: "◇",
+    label: "Catálogo",
+    modules: [
+      ["products", "◇", "Productos"],
+      ["inventory", "▤", "Inventario"],
+      ["categories", "▧", "Categorías"],
+    ],
+  },
+  {
+    id: "customers-delivery",
+    icon: "♙",
+    label: "Clientes y entregas",
+    modules: [
+      ["customers", "♙", "Clientes"],
+      ["shipping", "⌖", "Envíos"],
+    ],
+  },
+  {
+    id: "administration",
+    icon: "⚙",
+    label: "Administración",
+    modules: [["admins", "♧", "Administradores"]],
+  },
 ];
+
+function AdminFilterIcon({ filter }) {
+  if (filter === "all") {
+    return (
+      <svg viewBox="0 0 20 20" fill="none">
+        <rect x="3" y="3" width="5.5" height="5.5" rx="1" stroke="currentColor" strokeWidth="1.5" />
+        <rect
+          x="11.5"
+          y="3"
+          width="5.5"
+          height="5.5"
+          rx="1"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="3"
+          y="11.5"
+          width="5.5"
+          height="5.5"
+          rx="1"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+        <rect
+          x="11.5"
+          y="11.5"
+          width="5.5"
+          height="5.5"
+          rx="1"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        />
+      </svg>
+    );
+  }
+  if (filter === "pending") {
+    return (
+      <svg
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="10" cy="10" r="7" />
+        <path d="M10 6v4l2.5 1.5" />
+      </svg>
+    );
+  }
+  if (filter === "confirmed" || filter === "completed" || filter === "active") {
+    return (
+      <svg
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <circle cx="10" cy="10" r="7" />
+        <path d="m6.5 10 2.2 2.2 4.8-4.7" />
+      </svg>
+    );
+  }
+  if (filter === "cancelled" || filter === "voided") {
+    return (
+      <svg
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      >
+        <circle cx="10" cy="10" r="7" />
+        <path d="m7.5 7.5 5 5m0-5-5 5" />
+      </svg>
+    );
+  }
+  if (filter === "inactive") {
+    return (
+      <svg
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      >
+        <circle cx="10" cy="10" r="7" />
+        <path d="M7 10h6" />
+      </svg>
+    );
+  }
+  return (
+    <svg
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinejoin="round"
+    >
+      <path d="M10 3 18 17H2L10 3Z" />
+      <path d="M10 7.5v4M10 14.2v.1" strokeLinecap="round" />
+    </svg>
+  );
+}
 
 function SalesTrendChart({ days, onNavigate }) {
   const [hoveredDay, setHoveredDay] = useState(null);
@@ -352,10 +491,17 @@ function DeliverySettingsPanel({ settings, error, busy, onChange, onSave }) {
           <span className="label">Buscar sucursal</span>
           <input
             className="input"
+            type="search"
+            placeholder="Nombre, ciudad o provincia"
+            aria-label="Buscar sucursal"
             value={locationSearch}
             onChange={(event) => setLocationSearch(event.target.value)}
           />
         </label>
+        <p className="admin-list-result-count" role="status" aria-live="polite">
+          {filteredEpsLocations.length}{" "}
+          {filteredEpsLocations.length === 1 ? "sucursal encontrada" : "sucursales encontradas"}
+        </p>
         <div className="mt-3 grid max-h-80 gap-2 overflow-y-auto rounded border border-line p-3 sm:grid-cols-2">
           {filteredEpsLocations.map((location) => (
             <label className="flex items-start gap-2 text-sm" key={location.id}>
@@ -378,6 +524,11 @@ function DeliverySettingsPanel({ settings, error, busy, onChange, onSave }) {
               </span>
             </label>
           ))}
+          {!filteredEpsLocations.length && (
+            <p className="py-4 text-center text-sm text-muted" role="status">
+              No se encontraron sucursales con esa búsqueda.
+            </p>
+          )}
         </div>
         {!settings.availableEpsLocationIds.length && (
           <p className="mt-3 text-sm text-[#9d5144]" role="alert">
@@ -467,10 +618,17 @@ function DeliverySettingsPanel({ settings, error, busy, onChange, onSave }) {
           <span className="label">Buscar municipio</span>
           <input
             className="input"
+            type="search"
+            placeholder="Nombre del municipio"
+            aria-label="Buscar municipio"
             value={municipalitySearch}
             onChange={(event) => setMunicipalitySearch(event.target.value)}
           />
         </label>
+        <p className="admin-list-result-count" role="status" aria-live="polite">
+          {filteredMunicipalities.length}{" "}
+          {filteredMunicipalities.length === 1 ? "municipio encontrado" : "municipios encontrados"}
+        </p>
         <div className="mt-4 divide-y divide-line">
           {filteredMunicipalities.map((municipality) => (
             <label
@@ -493,6 +651,11 @@ function DeliverySettingsPanel({ settings, error, busy, onChange, onSave }) {
               </select>
             </label>
           ))}
+          {!filteredMunicipalities.length && (
+            <p className="py-4 text-center text-sm text-muted" role="status">
+              No se encontraron municipios con esa búsqueda.
+            </p>
+          )}
         </div>
       </section>
       {error && (
@@ -841,8 +1004,9 @@ function ProductFields({ record, categories, products }) {
                   />
                 </label>
                 <button
-                  className="text-left text-sm font-semibold text-[#9d5144] underline underline-offset-4 sm:col-span-2"
+                  className="inline-flex items-center gap-2 text-left text-sm font-semibold text-[#9d5144] underline underline-offset-4 sm:col-span-2"
                   type="button"
+                  aria-label={`Eliminar reseña ${index + 1}`}
                   onClick={() =>
                     setDraft((current) => ({
                       ...current,
@@ -850,6 +1014,7 @@ function ProductFields({ record, categories, products }) {
                     }))
                   }
                 >
+                  <TrashIcon />
                   Eliminar reseña
                 </button>
               </div>
@@ -1007,7 +1172,10 @@ function AdminModal({ form, close, save, data }) {
           label="Teléfono"
           name="phone"
           type="tel"
-          defaultValue={record?.phone || ""}
+          defaultValue={formatPhoneNumber(record?.phone || "")}
+          onBlur={(event) => {
+            event.currentTarget.value = formatPhoneNumber(event.currentTarget.value);
+          }}
           required
         />
       </>
@@ -1179,6 +1347,13 @@ export function Admin() {
   const [authReady, setAuthReady] = useState(false);
   const [authNotice, setAuthNotice] = useState("");
   const [form, setForm] = useState(null);
+  const [selectedOrderId, setSelectedOrderId] = useState(null);
+  const [selectedSaleId, setSelectedSaleId] = useState(null);
+  const [ordersFilter, setOrdersFilter] = useState("all");
+  const [salesFilter, setSalesFilter] = useState("all");
+  const [productCategoryFilter, setProductCategoryFilter] = useState("all");
+  const [inventoryFilter, setInventoryFilter] = useState("all");
+  const [adminFilter, setAdminFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [posCart, setPosCart] = useState([]);
   const [posCustomer, setPosCustomer] = useState("");
@@ -1780,7 +1955,40 @@ export function Admin() {
       />
     );
 
-  const heading = NAVIGATION.find(([id]) => id === active)?.[2] || "Resumen";
+  const activeModule = ADMIN_GROUPS.flatMap((group) => group.modules).find(([id]) => id === active);
+  const activeGroup = ADMIN_GROUPS.find((group) => group.modules.some(([id]) => id === active));
+  const selectedOrder = orders.find((order) => order.id === selectedOrderId);
+  const selectedSale = data.sales.find((sale) => sale.id === selectedSaleId);
+  const selectedSaleQuantity =
+    selectedSale?.items.reduce((sum, item) => sum + item.quantity, 0) || 0;
+  const selectedSaleStatus = selectedSale
+    ? {
+        label: selectedSale.status === "voided" ? "Anulada" : "Completada",
+        style:
+          selectedSale.status === "voided"
+            ? "order-detail-status-cancelled"
+            : "order-detail-status-confirmed",
+      }
+    : null;
+  const selectedOrderQuantity =
+    selectedOrder?.items.reduce((sum, item) => sum + item.quantity, 0) || 0;
+  const selectedOrderStatus = selectedOrder
+    ? {
+        label:
+          selectedOrder.status === "pending"
+            ? "Pendiente"
+            : selectedOrder.status === "confirmed"
+              ? "Confirmado"
+              : "Cancelado",
+        style:
+          selectedOrder.status === "pending"
+            ? "order-detail-status-pending"
+            : selectedOrder.status === "confirmed"
+              ? "order-detail-status-confirmed"
+              : "order-detail-status-cancelled",
+      }
+    : null;
+  const heading = activeModule?.[2] || "Resumen";
   const today = new Date().toDateString();
   const todaySales = data.sales.filter(
     (sale) => sale.status === "completed" && new Date(sale.date).toDateString() === today
@@ -1797,17 +2005,41 @@ export function Admin() {
       {action}
     </div>
   );
-  const toolbar = (placeholder) => (
-    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-      <input
-        className="input max-w-lg"
-        type="search"
-        placeholder={placeholder}
-        value={search}
-        onChange={(event) => setSearch(event.target.value)}
-      />
-      <span className="text-xs text-muted">Los cambios se guardan en este navegador</span>
+  const toolbar = (placeholder, accessory) => (
+    <div className="admin-list-toolbar">
+      <div className="admin-list-search" role="search" aria-label="Buscar en la lista">
+        <svg
+          aria-hidden="true"
+          className="h-5 w-5 shrink-0"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+        >
+          <circle cx="10.8" cy="10.8" r="6.8" />
+          <path d="m16 16 4.5 4.5" />
+        </svg>
+        <input
+          type="search"
+          aria-label={placeholder}
+          placeholder={placeholder}
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+        />
+        {search && (
+          <button type="button" onClick={() => setSearch("")} aria-label="Limpiar búsqueda">
+            Limpiar
+          </button>
+        )}
+      </div>
+      {accessory}
     </div>
+  );
+  const resultCount = (count, singular, plural) => (
+    <p className="admin-list-result-count" role="status" aria-live="polite">
+      {count} {count === 1 ? singular : plural}
+    </p>
   );
   const table = (headers, rows, empty) => (
     <div className="card table-scroll">
@@ -1842,10 +2074,29 @@ export function Admin() {
         Editar
       </button>
       <button
-        className="text-xs font-semibold text-[#9d5144] underline underline-offset-4"
+        className="grid h-9 w-9 place-items-center rounded-full text-[#9d5144] transition hover:bg-[#f8ece9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9d5144]"
+        type="button"
+        aria-label="Eliminar"
+        title="Eliminar"
         onClick={onDelete}
       >
-        Eliminar
+        <TrashIcon />
+      </button>
+    </div>
+  );
+  const entityActions = (label, onEdit, onDelete) => (
+    <div className="admin-entity-actions">
+      <button type="button" className="admin-entity-edit" onClick={onEdit}>
+        Editar
+      </button>
+      <button
+        type="button"
+        className="admin-entity-delete"
+        aria-label={`Eliminar ${label}`}
+        title={`Eliminar ${label}`}
+        onClick={onDelete}
+      >
+        <TrashIcon />
       </button>
     </div>
   );
@@ -2032,7 +2283,9 @@ export function Admin() {
                 </article>
               );
             }
-            const destinationLabel = NAVIGATION.find(([id]) => id === destination)?.[2];
+            const destinationLabel = ADMIN_GROUPS.flatMap((group) => group.modules).find(
+              ([id]) => id === destination
+            )?.[2];
             return (
               <button
                 type="button"
@@ -2161,6 +2414,14 @@ export function Admin() {
     );
   } else if (active === "products") {
     // La vista de productos expone el CRUD que alimenta el catálogo público.
+    const activeCategoryFilter = data.categories.some(
+      (category) => category.name === productCategoryFilter
+    )
+      ? productCategoryFilter
+      : "all";
+    const filteredProducts = visible(data.products).filter(
+      (product) => activeCategoryFilter === "all" || product.category === activeCategoryFilter
+    );
     content = (
       <>
         {cardHeading(
@@ -2170,52 +2431,122 @@ export function Admin() {
             ＋ Nuevo producto
           </button>
         )}
-        {toolbar("Buscar por nombre, SKU o categoría")}
-        {table(
-          ["Producto", "SKU", "Categoría", "Precio", "Stock", "Acciones"],
-          visible(data.products).map((product) => (
-            <tr key={product.id}>
-              <td>
-                <div className="flex items-center gap-3">
-                  <img
-                    className="h-11 w-11 rounded object-cover"
-                    src={product.image || DEFAULT_PRODUCTS[0].image}
-                    alt=""
-                  />
-                  <strong>{product.name}</strong>
-                </div>
-              </td>
-              <td>{product.sku}</td>
-              <td>{product.category}</td>
-              <td>{money(product.price)}</td>
-              <td className={product.stock <= LOW_STOCK ? "font-semibold text-[#a25836]" : ""}>
-                {product.stock}
-              </td>
-              <td>
-                {actions(
-                  () => openForm("product", product),
-                  () => removeRecord("products", product.id, "el producto")
-                )}
-              </td>
-            </tr>
-          )),
-          "No hay productos en el catálogo."
+        {toolbar(
+          "Buscar por nombre, SKU o categoría",
+          <label className="admin-list-category-filter">
+            <span>Categoría</span>
+            <select
+              className="input"
+              aria-label="Filtrar productos por categoría"
+              value={activeCategoryFilter}
+              onChange={(event) => setProductCategoryFilter(event.target.value)}
+            >
+              <option value="all">Todas ({data.products.length})</option>
+              {data.categories.map((category) => (
+                <option key={category.name} value={category.name}>
+                  {category.name} (
+                  {data.products.filter((product) => product.category === category.name).length})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {resultCount(filteredProducts.length, "producto encontrado", "productos encontrados")}
+        {filteredProducts.length ? (
+          <div className="admin-entity-grid">
+            {filteredProducts.map((product) => {
+              const stockStatus =
+                product.stock <= 0
+                  ? ["is-out", "Agotado"]
+                  : product.stock <= LOW_STOCK
+                    ? ["is-low", "Reponer"]
+                    : ["is-available", "Disponible"];
+              return (
+                <article className="admin-entity-card admin-product-card" key={product.id}>
+                  <div className="admin-entity-cover">
+                    <img
+                      src={product.image || DEFAULT_PRODUCTS[0].image}
+                      alt={product.name}
+                      loading="lazy"
+                    />
+                    <span className="admin-entity-cover-tag">{product.category}</span>
+                  </div>
+                  <div className="admin-entity-body">
+                    <div className="admin-product-heading">
+                      <div className="min-w-0">
+                        <p className="admin-entity-eyebrow">SKU · {product.sku}</p>
+                        <h3 className="admin-entity-title">{product.name}</h3>
+                      </div>
+                      <strong className="admin-product-price">{money(product.price)}</strong>
+                    </div>
+                    <div className={`admin-stock-indicator ${stockStatus[0]}`}>
+                      <span aria-hidden="true" />
+                      {stockStatus[1]} · {product.stock} unidades
+                    </div>
+                    {entityActions(
+                      `el producto ${product.name}`,
+                      () => openForm("product", product),
+                      () => removeRecord("products", product.id, "el producto")
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="admin-entity-empty" role="status">
+            {search || activeCategoryFilter !== "all"
+              ? "No hay productos que coincidan con esta búsqueda y categoría."
+              : "No hay productos en el catálogo."}
+          </div>
         )}
       </>
     );
   } else if (active === "inventory") {
     // La vista de inventario permite ajustar existencias sin editar el resto del producto.
     const low = data.products.filter((item) => item.stock <= LOW_STOCK).length;
+    const filteredInventory = visible(data.products).filter(
+      (product) => inventoryFilter === "all" || product.stock <= LOW_STOCK
+    );
     content = (
       <>
         {cardHeading(
           "Control de inventario",
           "Consulta existencias y ajusta el stock físico de cada producto."
         )}
-        {toolbar(`${low} productos con stock bajo (≤ ${LOW_STOCK})`)}
+        {toolbar(
+          "Buscar por producto, SKU o categoría",
+          <div
+            className="inventory-filter-group stock-filter-cards"
+            role="group"
+            aria-label="Filtrar inventario"
+          >
+            {[
+              ["all", "Todo el inventario", data.products.length],
+              ["low", "Necesitan reposición", low],
+            ].map(([filter, label, count]) => (
+              <button
+                key={filter}
+                type="button"
+                className={`inventory-filter-button ${inventoryFilter === filter ? "is-active" : ""} ${filter === "low" ? "is-low-stock" : ""}`}
+                aria-pressed={inventoryFilter === filter}
+                onClick={() => setInventoryFilter(filter)}
+              >
+                <span className="inventory-filter-icon" aria-hidden="true">
+                  <AdminFilterIcon filter={filter} />
+                </span>
+                <span className="inventory-filter-copy">
+                  <span>{label}</span>
+                  <strong>{count}</strong>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        {resultCount(filteredInventory.length, "producto encontrado", "productos encontrados")}
         {table(
           ["Producto", "SKU", "Categoría", "Estado", "Acciones"],
-          visible(data.products).map((product) => (
+          filteredInventory.map((product) => (
             <tr key={product.id}>
               <td className="font-semibold">{product.name}</td>
               <td>{product.sku}</td>
@@ -2225,20 +2556,38 @@ export function Admin() {
               </td>
               <td>
                 <button
-                  className="text-xs font-semibold text-leaf underline"
+                  type="button"
+                  className="inventory-adjust-button"
                   onClick={() => openForm("stock", product)}
                 >
-                  Ajustar stock
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 20 20"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M3 5.5h14M5.5 10h9M8 14.5h4" />
+                  </svg>
+                  <span>Ajustar stock</span>
+                  <span className="inventory-adjust-arrow" aria-hidden="true">
+                    →
+                  </span>
                 </button>
               </td>
             </tr>
           )),
-          "Agrega productos para administrar las existencias."
+          search || inventoryFilter !== "all"
+            ? "No hay productos que coincidan con esta búsqueda y filtro."
+            : "Agrega productos para administrar las existencias."
         )}
       </>
     );
   } else if (active === "categories") {
     // Renombrar una categoría actualiza también los productos relacionados.
+    const filteredCategories = visible(data.categories);
     content = (
       <>
         {cardHeading(
@@ -2248,67 +2597,80 @@ export function Admin() {
             ＋ Nueva categoría
           </button>
         )}
-        {table(
-          ["Categoría", "Orden", "Productos", "Acciones"],
-          visible(data.categories).map((category) => (
-            <tr key={category.name}>
-              <td>
-                <div className="flex items-center gap-3">
-                  {category.image && (
-                    <img className="h-11 w-11 rounded object-cover" src={category.image} alt="" />
-                  )}
-                  <div>
-                    <strong>{category.name}</strong>
-                    {category.description && (
-                      <p className="mt-1 max-w-sm text-xs text-muted">{category.description}</p>
+        {toolbar("Buscar categoría o descripción")}
+        {resultCount(filteredCategories.length, "categoría encontrada", "categorías encontradas")}
+        {filteredCategories.length ? (
+          <div className="admin-entity-grid admin-category-grid">
+            {filteredCategories.map((category) => {
+              const productCount = data.products.filter(
+                (product) => product.category === category.name
+              ).length;
+              return (
+                <article className="admin-entity-card admin-category-card" key={category.name}>
+                  <div className="admin-category-visual">
+                    {category.image ? (
+                      <img src={category.image} alt="" loading="lazy" />
+                    ) : (
+                      <span aria-hidden="true">{category.name.slice(0, 1).toUpperCase()}</span>
+                    )}
+                    <span className="admin-entity-cover-tag">Orden {category.sortOrder}</span>
+                  </div>
+                  <div className="admin-entity-body">
+                    <div>
+                      <h3 className="admin-entity-title">{category.name}</h3>
+                      <p className="admin-category-count">
+                        {productCount} {productCount === 1 ? "producto" : "productos"}
+                      </p>
+                      {category.description && (
+                        <p className="admin-category-description">{category.description}</p>
+                      )}
+                    </div>
+                    {entityActions(
+                      `la categoría ${category.name}`,
+                      () => openForm("category", category),
+                      async () => {
+                        if (productCount) {
+                          notify(
+                            "No se puede eliminar una categoría que tiene productos asignados.",
+                            "error"
+                          );
+                          return;
+                        }
+                        if (!window.confirm(`¿Eliminar la categoría "${category.name}"?`)) return;
+                        try {
+                          await deleteAdminCategory(category.name);
+                          setData((current) => ({
+                            ...current,
+                            categories: current.categories.filter(
+                              (item) => item.name !== category.name
+                            ),
+                          }));
+                          notify("Categoría eliminada del catálogo.");
+                        } catch (error) {
+                          notify(
+                            error instanceof Error
+                              ? error.message
+                              : "No se pudo eliminar la categoría.",
+                            "error"
+                          );
+                        }
+                      }
                     )}
                   </div>
-                </div>
-              </td>
-              <td>{category.sortOrder}</td>
-              <td>
-                {data.products.filter((product) => product.category === category.name).length}
-              </td>
-              <td>
-                {actions(
-                  () => openForm("category", category),
-                  async () => {
-                    if (data.products.some((product) => product.category === category.name)) {
-                      notify(
-                        "No se puede eliminar una categoría que tiene productos asignados.",
-                        "error"
-                      );
-                      return;
-                    }
-                    if (!window.confirm(`¿Eliminar la categoría "${category.name}"?`)) return;
-                    try {
-                      await deleteAdminCategory(category.name);
-                      setData((current) => ({
-                        ...current,
-                        categories: current.categories.filter(
-                          (item) => item.name !== category.name
-                        ),
-                      }));
-                      notify("Categoría eliminada del catálogo.");
-                    } catch (error) {
-                      notify(
-                        error instanceof Error
-                          ? error.message
-                          : "No se pudo eliminar la categoría.",
-                        "error"
-                      );
-                    }
-                  }
-                )}
-              </td>
-            </tr>
-          )),
-          "Aún no hay categorías."
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="admin-entity-empty" role="status">
+            {search ? "No hay categorías que coincidan con la búsqueda." : "Aún no hay categorías."}
+          </div>
         )}
       </>
     );
   } else if (active === "customers") {
     // Clientes son registros privados del panel y no se exponen en la tienda.
+    const filteredCustomers = visible(data.customers);
     content = (
       <>
         {cardHeading(
@@ -2319,115 +2681,272 @@ export function Admin() {
           </button>
         )}
         {toolbar("Buscar por nombre, correo o teléfono")}
-        {table(
-          ["Nombre", "Correo", "Teléfono", "Acciones"],
-          visible(data.customers).map((customer) => (
-            <tr key={customer.id}>
-              <td className="font-semibold">{customer.name}</td>
-              <td>{customer.email}</td>
-              <td>{customer.phone}</td>
-              <td>
-                {actions(
-                  () => openForm("customer", customer),
-                  () => removeRecord("customers", customer.id, "el cliente")
-                )}
-              </td>
-            </tr>
-          )),
-          "Aún no hay clientes."
+        {resultCount(filteredCustomers.length, "cliente encontrado", "clientes encontrados")}
+        {filteredCustomers.length ? (
+          <div className="admin-entity-grid admin-customer-grid">
+            {filteredCustomers.map((customer) => {
+              const initials =
+                customer.name
+                  .trim()
+                  .split(/\s+/)
+                  .slice(0, 2)
+                  .map((part) => part[0] || "")
+                  .join("")
+                  .toLocaleUpperCase("es-MX") || "?";
+              return (
+                <article className="admin-entity-card admin-customer-card" key={customer.id}>
+                  <div className="admin-customer-heading">
+                    <span className="admin-customer-avatar" aria-hidden="true">
+                      {initials}
+                    </span>
+                    <div className="min-w-0">
+                      <p className="admin-entity-eyebrow">Cliente registrado</p>
+                      <h3 className="admin-entity-title">{customer.name}</h3>
+                    </div>
+                  </div>
+                  <div className="admin-customer-contact">
+                    <p>
+                      <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                        <path
+                          d="M3 5.5h14v9H3zM3.5 6l6.5 5 6.5-5"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span>{customer.email}</span>
+                    </p>
+                    <p>
+                      <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                        <path
+                          d="M6.1 3.5 4 4.7c-.8.5-.9 1.6-.5 2.5a15 15 0 0 0 9.3 9.3c.9.4 2 .3 2.5-.5l1.2-2.1-3.1-2-1.6 1.6a11 11 0 0 1-4.8-4.8l1.6-1.6-2.5-3.6Z"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                      <span>{formatPhoneNumber(customer.phone)}</span>
+                    </p>
+                  </div>
+                  {entityActions(
+                    `al cliente ${customer.name}`,
+                    () => openForm("customer", customer),
+                    () => removeRecord("customers", customer.id, "el cliente")
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="admin-entity-empty" role="status">
+            {search ? "No hay clientes que coincidan con la búsqueda." : "Aún no hay clientes."}
+          </div>
         )}
       </>
     );
   } else if (active === "orders") {
+    const orderCounts = {
+      all: orders.length,
+      pending: orders.filter((order) => order.status === "pending").length,
+      confirmed: orders.filter((order) => order.status === "confirmed").length,
+      cancelled: orders.filter((order) => order.status === "cancelled").length,
+    };
+    const filteredOrders = visible(orders).filter(
+      (order) => ordersFilter === "all" || order.status === ordersFilter
+    );
     content = (
       <>
         {cardHeading(
           "Pedidos en línea",
           "Los pedidos pendientes no reservan existencias. Confirma solo después de revisar que aún haya stock."
         )}
-        {toolbar("Buscar por pedido, cliente o dirección")}
+        {toolbar(
+          "Buscar por pedido, cliente o dirección",
+          <div
+            className="inventory-filter-group orders-filter-cards"
+            role="group"
+            aria-label="Filtrar pedidos por estado"
+          >
+            {[
+              ["all", "Todos", orderCounts.all],
+              ["confirmed", "Confirmados", orderCounts.confirmed],
+              ["pending", "Pendientes", orderCounts.pending],
+              ["cancelled", "Cancelados", orderCounts.cancelled],
+            ].map(([filter, label, count]) => (
+              <button
+                key={filter}
+                type="button"
+                className={`inventory-filter-button is-${filter} ${ordersFilter === filter ? "is-active" : ""}`}
+                aria-pressed={ordersFilter === filter}
+                onClick={() => setOrdersFilter(filter)}
+              >
+                <span className="inventory-filter-icon" aria-hidden="true">
+                  <AdminFilterIcon filter={filter} />
+                </span>
+                <span className="inventory-filter-copy">
+                  <span>{label}</span>
+                  <strong>{count}</strong>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        <p className="admin-list-result-count" role="status" aria-live="polite">
+          {filteredOrders.length}{" "}
+          {filteredOrders.length === 1 ? "pedido encontrado" : "pedidos encontrados"}
+        </p>
         {table(
-          ["Pedido", "Fecha", "Cliente", "Entrega", "Artículos", "Total", "Estado", "Acciones"],
-          visible(orders).map((order) => (
-            <tr key={order.id}>
-              <td className="font-semibold">{order.id.slice(-8).toUpperCase()}</td>
-              <td>
-                {new Date(order.date).toLocaleString("es-MX", {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                })}
-              </td>
-              <td>
-                {order.customerName}
-                <span className="block text-xs text-muted">{order.shippingAddress.phone}</span>
-              </td>
-              <td>
-                {order.shippingAddress.name}
-                <span className="block text-xs text-muted">
+          ["Pedido", "Fecha", "Cliente", "Entrega", "Estado", "Acciones"],
+          filteredOrders.map((order) => {
+            const openOrder = () => setSelectedOrderId(order.id);
+            return (
+              <tr
+                key={order.id}
+                className="admin-order-row dashboard-activity-row"
+                tabIndex={0}
+                aria-label={`Ver detalles del pedido ${order.id.slice(-8).toUpperCase()}`}
+                aria-haspopup="dialog"
+                onClick={openOrder}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openOrder();
+                  }
+                }}
+              >
+                <td className="font-semibold">{order.id.slice(-8).toUpperCase()}</td>
+                <td>
+                  {new Date(order.date).toLocaleString("es-MX", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                </td>
+                <td>
+                  {order.customerName}
+                  <span className="block text-xs text-muted">
+                    {formatPhoneNumber(order.shippingAddress.phone)}
+                  </span>
+                </td>
+                <td>
                   {order.shippingAddress.deliveryMethod === "eps" ? (
                     <>
-                      Retiro en EPS: {order.shippingAddress.epsLocation.name}
-                      <br />
-                      {[
-                        order.shippingAddress.epsLocation.address,
-                        order.shippingAddress.epsLocation.city,
-                        order.shippingAddress.epsLocation.region,
-                      ]
-                        .filter(Boolean)
-                        .join(", ")}
+                      <span className="block font-semibold">
+                        EPS · {order.shippingAddress.epsLocation.name}
+                      </span>
+                      <span className="block text-xs text-muted">
+                        {[
+                          order.shippingAddress.epsLocation.address,
+                          order.shippingAddress.epsLocation.city,
+                          order.shippingAddress.epsLocation.region,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted">
+                        Recibe: {order.shippingAddress.name}
+                      </span>
                     </>
                   ) : (
-                    [
-                      order.shippingAddress.street,
-                      order.shippingAddress.sector,
-                      order.shippingAddress.municipality,
-                      order.shippingAddress.city,
-                      order.shippingAddress.region,
-                      order.shippingAddress.postalCode,
-                    ]
-                      .filter(Boolean)
-                      .join(", ")
+                    <>
+                      <span className="block font-semibold">
+                        {[order.shippingAddress.street, order.shippingAddress.municipality]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </span>
+                      <span className="block text-xs text-muted">
+                        {[
+                          order.shippingAddress.sector,
+                          order.shippingAddress.city,
+                          order.shippingAddress.region,
+                          order.shippingAddress.postalCode,
+                        ]
+                          .filter(Boolean)
+                          .join(", ")}
+                      </span>
+                      <span className="mt-1 block text-xs text-muted">
+                        Recibe: {order.shippingAddress.name}
+                      </span>
+                    </>
                   )}
-                </span>
-              </td>
-              <td>{order.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
-              <td>
-                {money(order.total)}
-                <span className="block text-xs text-muted">
-                  {money(order.subtotal)} + {money(order.shippingCost)} envío
-                  {order.deliveryZone ? ` · ${order.deliveryZone.name}` : " · Tarifa EPS"}
-                </span>
-              </td>
-              <td>
-                {order.status === "pending"
-                  ? "Pendiente"
-                  : order.status === "confirmed"
-                    ? "Confirmado"
-                    : "Cancelado"}
-              </td>
-              <td>
-                <div className="flex gap-3 whitespace-nowrap">
-                  {order.status === "pending" && (
-                    <button
-                      className="text-xs font-semibold text-leaf underline"
-                      onClick={() => updateOrder(order, "confirm")}
-                    >
-                      Confirmar
-                    </button>
-                  )}
-                  {order.status !== "cancelled" && (
-                    <button
-                      className="text-xs font-semibold text-[#9d5144] underline"
-                      onClick={() => updateOrder(order, "cancel")}
-                    >
-                      Cancelar
-                    </button>
-                  )}
-                </div>
-              </td>
-            </tr>
-          )),
-          "Aún no hay pedidos en línea."
+                </td>
+                <td>
+                  <span
+                    className={`order-list-status ${
+                      order.status === "pending"
+                        ? "is-pending"
+                        : order.status === "confirmed"
+                          ? "is-confirmed"
+                          : "is-cancelled"
+                    }`}
+                  >
+                    <span className="order-list-status-dot" aria-hidden="true" />
+                    {order.status === "pending"
+                      ? "Pendiente"
+                      : order.status === "confirmed"
+                        ? "Confirmado"
+                        : "Cancelado"}
+                  </span>
+                </td>
+                <td>
+                  <div
+                    className="flex gap-3 whitespace-nowrap"
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    {order.status === "pending" && (
+                      <button
+                        type="button"
+                        className="order-action-button order-action-confirm"
+                        aria-label={`Confirmar pedido ${order.id.slice(-8).toUpperCase()}`}
+                        title="Confirmar pedido"
+                        onClick={() => updateOrder(order, "confirm")}
+                      >
+                        <svg
+                          aria-hidden="true"
+                          className="h-4 w-4"
+                          viewBox="0 0 20 20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="m4 10 4 4 8-8" />
+                        </svg>
+                      </button>
+                    )}
+                    {order.status !== "cancelled" && (
+                      <button
+                        type="button"
+                        className="order-action-button order-action-cancel"
+                        aria-label={`Cancelar pedido ${order.id.slice(-8).toUpperCase()}`}
+                        title="Cancelar pedido"
+                        onClick={() => updateOrder(order, "cancel")}
+                      >
+                        <svg
+                          aria-hidden="true"
+                          className="h-4 w-4"
+                          viewBox="0 0 20 20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="m5 5 10 10M15 5 5 15" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          }),
+          search || ordersFilter !== "all"
+            ? "No hay pedidos que coincidan con esta búsqueda y filtro."
+            : "Aún no hay pedidos en línea."
         )}
       </>
     );
@@ -2459,6 +2978,14 @@ export function Admin() {
     );
   } else if (active === "admins") {
     // Administradores locales solo documentan el prototipo; no son autenticación real.
+    const adminCounts = {
+      all: data.admins.length,
+      active: data.admins.filter((admin) => admin.active).length,
+      inactive: data.admins.filter((admin) => !admin.active).length,
+    };
+    const filteredAdmins = visible(data.admins).filter(
+      (admin) => adminFilter === "all" || (adminFilter === "active" ? admin.active : !admin.active)
+    );
     content = (
       <>
         {cardHeading(
@@ -2469,64 +2996,297 @@ export function Admin() {
           </button>
         )}
         {toolbar("Buscar por nombre, correo o rol")}
-        {table(
-          ["Nombre", "Correo", "Rol", "Estado", "Acciones"],
-          visible(data.admins).map((admin) => (
-            <tr key={admin.id}>
-              <td className="font-semibold">{admin.name}</td>
-              <td>{admin.email}</td>
-              <td>{admin.role}</td>
-              <td>{admin.active ? "Activo" : "Inactivo"}</td>
-              <td>
-                {actions(
-                  () => openForm("admin", admin),
-                  () =>
-                    admin.id === "admin-demo"
-                      ? notify("No se puede eliminar el usuario demo.", "error")
-                      : removeRecord("admins", admin.id, "el administrador")
-                )}
-              </td>
-            </tr>
-          )),
-          "Aún no hay administradores."
+        <div className="inventory-filter-group" role="group" aria-label="Filtrar administradores">
+          {[
+            ["all", "Todos", adminCounts.all],
+            ["active", "Activos", adminCounts.active],
+            ["inactive", "Inactivos", adminCounts.inactive],
+          ].map(([filter, label, count]) => (
+            <button
+              key={filter}
+              type="button"
+              className={`inventory-filter-button ${filter === "active" ? "is-enabled" : `is-${filter}`} ${adminFilter === filter ? "is-active" : ""}`}
+              aria-pressed={adminFilter === filter}
+              onClick={() => setAdminFilter(filter)}
+            >
+              <span className="inventory-filter-icon" aria-hidden="true">
+                <AdminFilterIcon filter={filter} />
+              </span>
+              <span className="inventory-filter-copy">
+                <span>{label}</span>
+                <strong>{count}</strong>
+              </span>
+            </button>
+          ))}
+        </div>
+        {resultCount(
+          filteredAdmins.length,
+          "administrador encontrado",
+          "administradores encontrados"
+        )}
+        {filteredAdmins.length ? (
+          <div className="admin-entity-grid admin-admin-grid">
+            {filteredAdmins.map((admin) => {
+              const initials =
+                admin.name
+                  .trim()
+                  .split(/\s+/)
+                  .slice(0, 2)
+                  .map((part) => part[0] || "")
+                  .join("")
+                  .toLocaleUpperCase("es-MX") || "?";
+              return (
+                <article className="admin-entity-card admin-admin-card" key={admin.id}>
+                  <div className="admin-admin-heading">
+                    <span className="admin-admin-avatar" aria-hidden="true">
+                      {initials}
+                    </span>
+                    <span
+                      className={`admin-admin-status ${admin.active ? "is-active" : "is-inactive"}`}
+                    >
+                      <span aria-hidden="true" />
+                      {admin.active ? "Activo" : "Inactivo"}
+                    </span>
+                  </div>
+                  <div className="admin-entity-body">
+                    <div>
+                      <h3 className="admin-entity-title">{admin.name}</h3>
+                      <p className="admin-admin-role">{admin.role}</p>
+                      <p className="admin-admin-email">{admin.email}</p>
+                    </div>
+                    {entityActions(
+                      `al administrador ${admin.name}`,
+                      () => openForm("admin", admin),
+                      () =>
+                        admin.id === "admin-demo"
+                          ? notify("No se puede eliminar el usuario demo.", "error")
+                          : removeRecord("admins", admin.id, "el administrador")
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="admin-entity-empty" role="status">
+            {search || adminFilter !== "all"
+              ? "No hay administradores que coincidan con esta búsqueda y filtro."
+              : "Aún no hay administradores."}
+          </div>
         )}
       </>
     );
   } else if (active === "sales") {
     // El historial conserva instantáneas y permite devolver inventario al anular ventas.
+    const completedSales = data.sales.filter((sale) => sale.status === "completed");
+    const voidedSales = data.sales.filter((sale) => sale.status === "voided");
+    const completedRevenue = completedSales.reduce((sum, sale) => sum + sale.total, 0);
+    const filteredSales = visible(data.sales).filter((sale) => {
+      if (salesFilter === "completed") return sale.status === "completed";
+      if (salesFilter === "voided") return sale.status === "voided";
+      return true;
+    });
     content = (
       <>
-        {cardHeading("Ventas", "Consulta transacciones y restaura inventario al anular una venta.")}
-        {toolbar("Buscar por venta, cliente o método de pago")}
+        {cardHeading(
+          "Historial de ventas",
+          "Explora transacciones, revisa sus artículos y filtra por estado."
+        )}
+        <div className="sales-overview-grid">
+          <article className="sales-overview-card">
+            <span className="sales-overview-icon sales-overview-icon-complete" aria-hidden="true">
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="m5 12 4 4L19 6" />
+              </svg>
+            </span>
+            <span className="sales-overview-copy">
+              <span className="sales-overview-label">Ventas completadas</span>
+              <strong className="sales-overview-value">{completedSales.length}</strong>
+            </span>
+          </article>
+          <article className="sales-overview-card">
+            <span className="sales-overview-icon sales-overview-icon-revenue" aria-hidden="true">
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M12 2v20M17 6.5c0-1.4-1.8-2.5-4-2.5S9 5.1 9 6.5 10.8 9 13 9s4 1.1 4 2.5-1.8 2.5-4 2.5-4-1.1-4-2.5" />
+              </svg>
+            </span>
+            <span className="sales-overview-copy">
+              <span className="sales-overview-label">Ingresos completados</span>
+              <strong className="sales-overview-value">{money(completedRevenue)}</strong>
+            </span>
+          </article>
+          <article className="sales-overview-card">
+            <span className="sales-overview-icon sales-overview-icon-voided" aria-hidden="true">
+              <svg
+                className="h-5 w-5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M5 5l14 14M19 5 5 19" />
+              </svg>
+            </span>
+            <span className="sales-overview-copy">
+              <span className="sales-overview-label">Ventas anuladas</span>
+              <strong className="sales-overview-value">{voidedSales.length}</strong>
+            </span>
+          </article>
+        </div>
+        <div className="sales-explorer">
+          <div className="sales-search">
+            <svg
+              aria-hidden="true"
+              className="h-5 w-5 shrink-0 text-muted"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            >
+              <circle cx="10.8" cy="10.8" r="6.8" />
+              <path d="m16 16 4.5 4.5" />
+            </svg>
+            <input
+              type="search"
+              aria-label="Buscar ventas"
+              placeholder="Buscar por venta, cliente o método de pago"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            {search && (
+              <button
+                type="button"
+                className="sales-search-clear"
+                aria-label="Limpiar búsqueda"
+                onClick={() => setSearch("")}
+              >
+                Limpiar
+              </button>
+            )}
+          </div>
+          <div
+            className="inventory-filter-group sales-filter-cards"
+            role="group"
+            aria-label="Filtrar ventas por estado"
+          >
+            {[
+              ["all", "Todas", data.sales.length],
+              ["completed", "Completadas", completedSales.length],
+              ["voided", "Anuladas", voidedSales.length],
+            ].map(([filter, label, count]) => (
+              <button
+                key={filter}
+                type="button"
+                className={`inventory-filter-button is-${filter} ${salesFilter === filter ? "is-active" : ""}`}
+                aria-pressed={salesFilter === filter}
+                onClick={() => setSalesFilter(filter)}
+              >
+                <span className="inventory-filter-icon" aria-hidden="true">
+                  <AdminFilterIcon filter={filter} />
+                </span>
+                <span className="inventory-filter-copy">
+                  <span>{label}</span>
+                  <strong>{count}</strong>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <p className="mb-3 text-xs text-muted" role="status" aria-live="polite">
+          {filteredSales.length}{" "}
+          {filteredSales.length === 1 ? "venta encontrada" : "ventas encontradas"}
+        </p>
         {table(
-          ["Venta", "Fecha", "Cliente", "Pago", "Artículos", "Total", "Estado", "Acciones"],
-          visible(data.sales).map((sale) => (
-            <tr key={sale.id}>
-              <td>{sale.id.slice(-8).toUpperCase()}</td>
-              <td>
-                {new Date(sale.date).toLocaleString("es-MX", {
-                  dateStyle: "short",
-                  timeStyle: "short",
-                })}
-              </td>
-              <td>{sale.customerName || "Venta de mostrador"}</td>
-              <td>{sale.paymentMethod}</td>
-              <td>{sale.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
-              <td>{money(sale.total)}</td>
-              <td>{sale.status === "voided" ? "Anulada" : "Completada"}</td>
-              <td>
-                {sale.status === "completed" && (
-                  <button
-                    className="text-xs font-semibold text-[#9d5144] underline"
-                    onClick={() => voidSale(sale)}
+          ["Venta", "Fecha", "Cliente", "Pago", "Artículos", "Total", "Estado", "Acción"],
+          filteredSales.map((sale) => {
+            const openSale = () => setSelectedSaleId(sale.id);
+            return (
+              <tr
+                key={sale.id}
+                className="admin-order-row dashboard-activity-row"
+                tabIndex={0}
+                aria-label={`Ver detalle de la venta ${sale.id.slice(-8).toUpperCase()}`}
+                aria-haspopup="dialog"
+                onClick={openSale}
+                onKeyDown={(event) => {
+                  if (event.target !== event.currentTarget) return;
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    openSale();
+                  }
+                }}
+              >
+                <td className="font-semibold">{sale.id.slice(-8).toUpperCase()}</td>
+                <td>
+                  {new Date(sale.date).toLocaleString("es-MX", {
+                    dateStyle: "short",
+                    timeStyle: "short",
+                  })}
+                </td>
+                <td>{sale.customerName || "Venta de mostrador"}</td>
+                <td>
+                  <span className="sales-payment-chip">{sale.paymentMethod}</span>
+                </td>
+                <td>{sale.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
+                <td className="font-semibold tabular-nums">{money(sale.total)}</td>
+                <td>
+                  <span
+                    className={`sales-status-chip ${sale.status === "voided" ? "is-voided" : "is-completed"}`}
                   >
-                    Anular
-                  </button>
-                )}
-              </td>
-            </tr>
-          )),
-          "Aún no hay ventas."
+                    <span className="sales-status-dot" aria-hidden="true" />
+                    {sale.status === "voided" ? "Anulada" : "Completada"}
+                  </span>
+                </td>
+                <td>
+                  <div className="flex justify-start" onClick={(event) => event.stopPropagation()}>
+                    {sale.status === "completed" && (
+                      <button
+                        type="button"
+                        className="order-action-button order-action-cancel"
+                        aria-label={`Anular venta ${sale.id.slice(-8).toUpperCase()}`}
+                        title="Anular venta"
+                        onClick={() => voidSale(sale)}
+                      >
+                        <svg
+                          aria-hidden="true"
+                          className="h-4 w-4"
+                          viewBox="0 0 20 20"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        >
+                          <path d="m5 5 10 10M15 5 5 15" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          }),
+          search || salesFilter !== "all"
+            ? "No hay ventas que coincidan con esta búsqueda y filtro."
+            : "Aún no hay ventas."
         )}
       </>
     );
@@ -2654,22 +3414,12 @@ export function Admin() {
                         </button>
                         <button
                           type="button"
-                          className="ml-1 grid h-9 w-9 place-items-center rounded-full text-lg text-[#9d5144] transition hover:bg-[#fbe9e7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9d5144]"
+                          className="ml-1 grid h-9 w-9 place-items-center rounded-full text-[#9d5144] transition hover:bg-[#fbe9e7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#9d5144]"
                           onClick={() => addPos(product.id, 0)}
                           aria-label={`Quitar ${product.name} de la venta`}
                           title="Quitar producto"
                         >
-                          <svg
-                            aria-hidden="true"
-                            className="h-4 w-4"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                          >
-                            <path d="M5 5l14 14M19 5 5 19" />
-                          </svg>
+                          <TrashIcon />
                         </button>
                       </div>
                     </div>
@@ -2762,6 +3512,7 @@ export function Admin() {
                   setPosPayment(PAYMENT_METHODS[0]);
                 }}
               >
+                <TrashIcon />
                 Limpiar pedido
               </button>
               <button
@@ -2793,25 +3544,38 @@ export function Admin() {
         <p className="hidden px-5 pb-2 text-[.62rem] font-semibold tracking-[.2em] text-white/45 lg:block">
           GESTIÓN
         </p>
-        <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col lg:overflow-y-auto">
-          {NAVIGATION.map(([id, icon, label]) => (
-            <button
-              key={id}
-              className={`flex shrink-0 items-center gap-3 rounded-md px-3 py-2.5 text-left text-xs transition lg:w-full lg:text-sm ${active === id ? "bg-white/12 text-lime" : "text-white/70 hover:bg-white/8 hover:text-white"}`}
-              onClick={() => {
-                setActive(id);
-                setSearch("");
-              }}
-            >
-              <span className="w-5 text-center text-base">{icon}</span>
-              {label}
-              {id === "pos" && (
-                <span className="ml-auto hidden rounded bg-lime/15 px-1.5 py-0.5 text-[.55rem] text-lime lg:inline">
-                  POS
-                </span>
-              )}
-            </button>
-          ))}
+        <nav
+          className="flex gap-1 overflow-x-auto px-3 pb-3 lg:flex-col lg:overflow-y-auto"
+          aria-label="Apartados de administración"
+        >
+          <button
+            className={`flex shrink-0 items-center gap-3 rounded-md px-3 py-2.5 text-left text-xs transition lg:w-full lg:text-sm ${active === "dashboard" ? "bg-white/12 text-lime" : "text-white/70 hover:bg-white/8 hover:text-white"}`}
+            aria-current={active === "dashboard" ? "page" : undefined}
+            onClick={() => {
+              setActive("dashboard");
+              setSearch("");
+            }}
+          >
+            <span className="w-5 text-center text-base">▦</span>
+            Resumen
+          </button>
+          {ADMIN_GROUPS.map((group) => {
+            const isCurrentGroup = activeGroup?.id === group.id;
+            return (
+              <button
+                key={group.id}
+                className={`flex shrink-0 items-center gap-3 rounded-md px-3 py-2.5 text-left text-xs transition lg:w-full lg:text-sm ${isCurrentGroup ? "bg-white/12 text-lime" : "text-white/70 hover:bg-white/8 hover:text-white"}`}
+                aria-current={isCurrentGroup ? "page" : undefined}
+                onClick={() => {
+                  if (!isCurrentGroup) setActive(group.modules[0][0]);
+                  setSearch("");
+                }}
+              >
+                <span className="w-5 text-center text-base">{group.icon}</span>
+                {group.label}
+              </button>
+            );
+          })}
         </nav>
         <div className="mt-auto hidden px-5 py-5 text-xs text-white/55 lg:block">
           <p>Panel local de demostración</p>
@@ -2821,48 +3585,69 @@ export function Admin() {
         </div>
       </aside>
       <div className="min-w-0 flex-1 lg:ml-64">
-        <header className="sticky top-0 z-20 flex items-center justify-between border-b border-[#e4e6df] bg-white/90 px-5 py-4 backdrop-blur sm:px-8">
-          <div>
-            <p className="text-[.63rem] font-bold uppercase tracking-[.18em] text-[#78836e]">
-              Operaciones · Amway
-            </p>
-            <h1 className="mt-1 font-display text-2xl">{heading}</h1>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="hidden items-center gap-2 rounded-full bg-[#eff2e7] px-3 py-2 text-xs text-leaf sm:flex">
-              <span className="h-2 w-2 rounded-full bg-[#84933c]" />
-              Modo demo
-            </span>
-            <button
-              type="button"
-              className="grid h-10 w-10 place-items-center rounded-full border border-line bg-white text-leaf transition hover:bg-paper"
-              aria-label="Cerrar sesión"
-              title="Cerrar sesión"
-              onClick={async () => {
-                try {
-                  await logoutAdmin();
-                  setAuthenticated(false);
-                } catch (error) {
-                  console.error("No se pudo cerrar la sesión de Admin.", error);
-                  notify("No se pudo cerrar la sesión con el servidor.", "error");
-                }
-              }}
-            >
-              <svg
-                aria-hidden="true"
-                className="h-5 w-5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+        <header className="admin-topbar sticky top-0 z-20 border-b border-[#e4e6df] bg-white/90 px-5 backdrop-blur sm:px-8">
+          <div className="flex items-center justify-between gap-4 py-4">
+            <div>
+              <p className="text-[.63rem] font-bold uppercase tracking-[.18em] text-[#78836e]">
+                {activeGroup ? `${activeGroup.label} · Amway` : "Operaciones · Amway"}
+              </p>
+              <h1 className="mt-1 font-display text-2xl">{heading}</h1>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="hidden items-center gap-2 rounded-full bg-[#eff2e7] px-3 py-2 text-xs text-leaf sm:flex">
+                <span className="h-2 w-2 rounded-full bg-[#84933c]" />
+                Modo demo
+              </span>
+              <button
+                type="button"
+                className="grid h-10 w-10 place-items-center rounded-full border border-line bg-white text-leaf transition hover:bg-paper"
+                aria-label="Cerrar sesión"
+                title="Cerrar sesión"
+                onClick={async () => {
+                  try {
+                    await logoutAdmin();
+                    setAuthenticated(false);
+                  } catch (error) {
+                    console.error("No se pudo cerrar la sesión de Admin.", error);
+                    notify("No se pudo cerrar la sesión con el servidor.", "error");
+                  }
+                }}
               >
-                <path d="M12 3v9" />
-                <path d="M18.36 6.64a9 9 0 1 1-12.72 0" />
-              </svg>
-            </button>
+                <svg
+                  aria-hidden="true"
+                  className="h-5 w-5"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 3v9" />
+                  <path d="M18.36 6.64a9 9 0 1 1-12.72 0" />
+                </svg>
+              </button>
+            </div>
           </div>
+          {activeGroup && (
+            <nav className="admin-module-nav" aria-label={`Módulos de ${activeGroup.label}`}>
+              {activeGroup.modules.map(([id, , label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`admin-module-tab ${active === id ? "is-active" : ""}`}
+                  aria-current={active === id ? "page" : undefined}
+                  onClick={() => {
+                    setActive(id);
+                    setSearch("");
+                  }}
+                >
+                  {label}
+                  {id === "pos" && <span className="admin-module-badge">POS</span>}
+                </button>
+              ))}
+            </nav>
+          )}
         </header>
         <div className="flex items-start gap-3 border-b border-[#eadcc3] bg-[#fbf3e4] px-5 py-3 text-xs leading-5 text-[#755a30] sm:px-8">
           <span>ⓘ</span>
@@ -2877,6 +3662,261 @@ export function Admin() {
         </footer>
       </div>
       <AdminModal form={form} close={() => setForm(null)} save={saveForm} data={data} />
+      {selectedOrder && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/45 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedOrderId(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setSelectedOrderId(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-order-dialog-title"
+            className="order-detail-modal my-5 flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl"
+          >
+            <header className="order-detail-header">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <p className="order-detail-eyebrow">Pedido en línea</p>
+                  <h2 id="admin-order-dialog-title" className="mt-1 font-display text-3xl">
+                    #{selectedOrder.id.slice(-8).toUpperCase()}
+                  </h2>
+                  <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/75">
+                    <span className="inline-flex items-center gap-2">
+                      <svg
+                        aria-hidden="true"
+                        className="h-4 w-4"
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <circle cx="10" cy="6" r="3" />
+                        <path d="M4.5 17a5.5 5.5 0 0 1 11 0" />
+                      </svg>
+                      {selectedOrder.customerName}
+                    </span>
+                    <span>
+                      {new Date(selectedOrder.date).toLocaleString("es-MX", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <span className={`order-detail-status ${selectedOrderStatus.style}`}>
+                <span aria-hidden="true" className="order-detail-status-dot" />
+                {selectedOrderStatus.label}
+              </span>
+            </header>
+            <div className="order-detail-content">
+              <section aria-labelledby="admin-order-products-title">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 id="admin-order-products-title" className="font-display text-xl">
+                      Productos
+                    </h3>
+                    <p className="mt-1 text-xs text-muted">Detalle de los artículos solicitados</p>
+                  </div>
+                  <span className="order-detail-count">
+                    {selectedOrderQuantity} {selectedOrderQuantity === 1 ? "unidad" : "unidades"}
+                  </span>
+                </div>
+                <div className="grid gap-2">
+                  {selectedOrder.items.map((item) => {
+                    const productImage =
+                      data.products.find((product) => product.id === item.productId)?.image ||
+                      DEFAULT_PRODUCTS[0].image;
+                    return (
+                      <article className="order-detail-item" key={item.productId}>
+                        <img
+                          className="order-detail-product-image"
+                          src={productImage}
+                          alt=""
+                          loading="lazy"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold">{item.name}</p>
+                          <p className="mt-1 text-xs text-muted">
+                            SKU {item.sku} <span aria-hidden="true">·</span> {money(item.unitPrice)}{" "}
+                            c/u
+                          </p>
+                        </div>
+                        <span className="order-detail-quantity">× {item.quantity}</span>
+                        <strong className="order-detail-line-total min-w-20 text-right text-sm tabular-nums">
+                          {money(item.unitPrice * item.quantity)}
+                        </strong>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+              <aside className="order-detail-summary" aria-label="Resumen del pedido">
+                <div className="mb-4 flex items-center justify-between">
+                  <h3 className="font-display text-lg">Resumen</h3>
+                  {selectedOrder.deliveryZone && (
+                    <span className="order-detail-zone">{selectedOrder.deliveryZone.name}</span>
+                  )}
+                </div>
+                <dl className="grid gap-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted">Subtotal de productos</dt>
+                    <dd className="font-medium tabular-nums">{money(selectedOrder.subtotal)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted">Envío</dt>
+                    <dd className="font-medium tabular-nums">
+                      {money(selectedOrder.shippingCost)}
+                    </dd>
+                  </div>
+                </dl>
+                <div className="order-detail-total">
+                  <span>Total del pedido</span>
+                  <strong>{money(selectedOrder.total)}</strong>
+                </div>
+              </aside>
+            </div>
+            <footer className="order-detail-footer">
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={() => setSelectedOrderId(null)}
+                autoFocus
+              >
+                Cerrar
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+      {selectedSale && (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-ink/45 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSelectedSaleId(null);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") setSelectedSaleId(null);
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="admin-sale-dialog-title"
+            className="order-detail-modal my-5 flex max-h-[calc(100vh-2rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-line bg-white shadow-2xl"
+          >
+            <header className="order-detail-header">
+              <div className="min-w-0">
+                <p className="order-detail-eyebrow">Transacción de punto de venta</p>
+                <h2 id="admin-sale-dialog-title" className="mt-1 font-display text-3xl">
+                  #{selectedSale.id.slice(-8).toUpperCase()}
+                </h2>
+                <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-white/75">
+                  <span>{selectedSale.customerName || "Venta de mostrador"}</span>
+                  <span>
+                    {new Date(selectedSale.date).toLocaleString("es-MX", {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
+                  </span>
+                  <span>{selectedSale.paymentMethod}</span>
+                </div>
+              </div>
+              <span className={`order-detail-status ${selectedSaleStatus.style}`}>
+                <span aria-hidden="true" className="order-detail-status-dot" />
+                {selectedSaleStatus.label}
+              </span>
+            </header>
+            <div className="order-detail-content">
+              <section aria-labelledby="admin-sale-products-title">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h3 id="admin-sale-products-title" className="font-display text-xl">
+                      Productos
+                    </h3>
+                    <p className="mt-1 text-xs text-muted">Artículos incluidos en la transacción</p>
+                  </div>
+                  <span className="order-detail-count">
+                    {selectedSaleQuantity} {selectedSaleQuantity === 1 ? "unidad" : "unidades"}
+                  </span>
+                </div>
+                <div className="grid gap-2">
+                  {selectedSale.items.map((item) => {
+                    const productImage =
+                      data.products.find((product) => product.id === item.productId)?.image ||
+                      DEFAULT_PRODUCTS[0].image;
+                    return (
+                      <article className="order-detail-item" key={item.productId}>
+                        <img
+                          className="order-detail-product-image"
+                          src={productImage}
+                          alt=""
+                          loading="lazy"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate font-semibold">{item.name}</p>
+                          <p className="mt-1 text-xs text-muted">
+                            SKU {item.sku} <span aria-hidden="true">·</span> {money(item.unitPrice)}{" "}
+                            c/u
+                          </p>
+                        </div>
+                        <span className="order-detail-quantity">× {item.quantity}</span>
+                        <strong className="order-detail-line-total min-w-20 text-right text-sm tabular-nums">
+                          {money(item.unitPrice * item.quantity)}
+                        </strong>
+                      </article>
+                    );
+                  })}
+                </div>
+              </section>
+              <aside className="order-detail-summary" aria-label="Resumen de la venta">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <h3 className="font-display text-lg">Resumen de venta</h3>
+                  <span className="order-detail-zone">{selectedSale.paymentMethod}</span>
+                </div>
+                <dl className="grid gap-3 text-sm">
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted">Cliente</dt>
+                    <dd className="text-right font-medium">
+                      {selectedSale.customerName || "Venta de mostrador"}
+                    </dd>
+                  </div>
+                  <div className="flex justify-between gap-4">
+                    <dt className="text-muted">Unidades</dt>
+                    <dd className="font-medium tabular-nums">{selectedSaleQuantity}</dd>
+                  </div>
+                </dl>
+                <div className="order-detail-total">
+                  <span>Total de la venta</span>
+                  <strong>{money(selectedSale.total)}</strong>
+                </div>
+                {selectedSale.status === "voided" && (
+                  <p className="mt-3 text-xs leading-5 text-[#9d5144]">
+                    Esta transacción fue anulada y no se considera ingreso.
+                  </p>
+                )}
+              </aside>
+            </div>
+            <footer className="order-detail-footer">
+              <button
+                className="btn-secondary"
+                type="button"
+                onClick={() => setSelectedSaleId(null)}
+                autoFocus
+              >
+                Cerrar
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
       {region}
     </div>
   );

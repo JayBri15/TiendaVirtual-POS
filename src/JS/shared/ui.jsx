@@ -69,6 +69,26 @@ export function ThemeToggle() {
   );
 }
 
+export function TrashIcon({ className = "h-4 w-4" }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 6h18" />
+      <path d="M8 6V4h8v2" />
+      <path d="m19 6-1 14H6L5 6" />
+      <path d="M10 11v5M14 11v5" />
+    </svg>
+  );
+}
+
 /** Searchable, themed alternative to the browser-native select menu. */
 export function SelectMenu({
   id,
